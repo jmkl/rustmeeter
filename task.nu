@@ -23,19 +23,19 @@ def main [ arg?:string] {
     }
     "zip"       => {
           let name = date now | format date "%d-%m-%Y_%H%M%S"
-          let files = [".cargo",
-                ".gitignore",
+          let files = [
+                ".cargo",
                 "Cargo.lock",
                 "Cargo.toml",
                 "README.md",
-                "build.rs",
+                "crates",
                 "task.nu",
                 "src"]
-          ouch compress -y ...($files)  ($name)_rustmeeter.zip
+          7z a -tzip ($name)_automatools.zip ...$files -xr!*.cact
     }
 
       _         => { print $help }
     }
-  
+
 }
 

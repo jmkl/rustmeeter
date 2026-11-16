@@ -19,6 +19,8 @@ real devices (and VB-Cable) and has a live speech-to-text caption logger built o
 | **llvm-mingw** (x86_64, UCRT), unzip to `C:\tools\llvm-mingw` | github.com/mstorsjo/llvm-mingw/releases |
 | Cactus engine `libcactus.a` (+ `cactus.h` for reference) | `cactus\libcactus.a` in this folder. From huggingface.co/Cactus-Compute/cactus -> `releases/4.1.1/windows-x86_64` |
 | Whistle model `whistle.cact` | `cactus\whistle.cact` (huggingface.co/Cactus-Compute/whistle) |
+| Needle 3 model `needle3.cact` (optional, voice commands) | `cactus\needle3.cact` (huggingface.co/Cactus-Compute/needle3) |
+| Mirage model `mirage.cact` (optional, vision) | `cactus\mirage.cact` (huggingface.co/Cactus-Compute/mirage) |
 | VB-Cable (only if other apps must receive your mixed audio as a mic) | vb-audio.com/Cable |
 
 Why gnullvm? `libcactus.a` is a C++ static library. Linking it with MSVC or classic MinGW
@@ -153,7 +155,8 @@ src/events.rs    Event + EventHandler: stream errors / lifecycle reported to any
 src/gui/main.rs  windows-reactor GUI (feature `gui`), a thin frontend over the library
 src/captions.rs  Tap -> VAD -> Transcriber -> log file
 src/caption_controller.rs  runtime captions on/off, lazy one-time model load (used by CLI and any GUI)
-src/cactus.rs    FFI to libcactus (feature `cactus`): Whistle implements Transcriber
+src/cactus.rs    FFI to libcactus (feature `cactus`): Whistle (speech), Agent (Needle 3 text/tool calling), Mirage (vision); streaming transcription too
+examples/needle3_toolcall.rs   runnable Needle 3 tool-calling demo (`cargo run --release --example needle3_toolcall --features cactus`)
 build.rs         links Cactus + static libc++/libunwind
 ```
 Key ideas:

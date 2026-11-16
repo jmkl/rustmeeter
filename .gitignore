@@ -1,4 +1,4 @@
 target/
 captions.log
-cactus/whistle.cact
+cactus/*.cact
 *.zip

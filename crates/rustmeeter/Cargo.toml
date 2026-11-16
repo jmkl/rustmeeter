@@ -1,0 +1,13 @@
+[package]
+name = "rustmeeter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustmeeter-core = { path = "../rustmeeter-core" }
+anyhow = "1"
+windows-reactor = { path = "../../../windows-rs/crates/libs/reactor" }
+
+[features]
+default = ["cactus"]
+cactus = ["rustmeeter-core/cactus"]

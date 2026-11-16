@@ -13,12 +13,14 @@
 //!
 //!   cargo run --release --features gui --bin rustmeeter-gui
 
-use rustmeeter::*;
+use std::cell::Cell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rustmeeter_core::*;
 use windows_reactor::*;
 
 const MAX_LINES: usize = 500;
@@ -45,6 +47,7 @@ const RED: Color = Color::rgb(0xF8, 0x71, 0x71);
 const RED_STRONG: Color = Color::rgb(0xDC, 0x26, 0x26);
 
 /// Messages sent to the UI thread: user actions, async events and the meter tick.
+#[derive(Clone)]
 enum Message {
     Tick,
     Event(Event),
@@ -71,6 +74,7 @@ struct MixerApp {
     next_line: u64,
     error: Option<String>,
     timer: Option<ComponentTimer>,
+
 }
 
 impl MixerApp {
@@ -93,6 +97,7 @@ impl MixerApp {
             Some(device) => self.outputs.iter().position(|o| o == device).map(|i| i + 1),
         }
     }
+
 }
 
 impl Component for MixerApp {
@@ -150,6 +155,7 @@ impl Component for MixerApp {
             next_line: 0,
             error: None,
             timer: Some(context.set_timeout(TICK, Message::Tick)),
+
         };
         app.start();
         app
@@ -533,7 +539,7 @@ impl MixerApp {
                     .column_spacing(4.0)
                     .children((
                         TextBlock::new()
-                            .text(["L", "M", "H"][band])
+                            .text(EQ_BAND_NAMES[band])
                             .font_size(9.0)
                             .foreground(Brush::Solid(DIM))
                             .vertical_alignment(VerticalAlignment::Center),
@@ -933,3 +939,5 @@ fn main() {
     )
     .unwrap();
 }
+
+

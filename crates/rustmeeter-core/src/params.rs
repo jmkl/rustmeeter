@@ -61,7 +61,7 @@ impl Params {
         self.mute.store(m, Relaxed)
     }
 
-    /// `band`: 0 = low, 1 = mid, 2 = high.
+    /// and: 0 = low, 1 = mid, 2 = high.
     pub fn eq_db(&self, band: usize) -> f32 {
         self.eq_db[band].get()
     }

@@ -106,6 +106,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cactus-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+]
+
+[[package]]
 name = "cc"
 version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -659,12 +667,29 @@ name = "rustmeeter"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "rustmeeter-core",
+ "windows-reactor",
+]
+
+[[package]]
+name = "rustmeeter-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rustmeeter-core",
+]
+
+[[package]]
+name = "rustmeeter-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "biquad",
+ "cactus-core",
  "chrono",
  "cpal",
  "ringbuf",
  "serde_json",
- "windows-reactor",
 ]
 
 [[package]]

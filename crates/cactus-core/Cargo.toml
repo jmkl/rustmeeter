@@ -1,0 +1,12 @@
+[package]
+name = "cactus-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+
+[lib]
+name = "cactus_core"
+path = "src/lib.rs"

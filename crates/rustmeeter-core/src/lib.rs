@@ -2,7 +2,15 @@
 //! Frontends only need `Mixer`, `Params`, and the device helpers.
 
 #[cfg(feature = "cactus")]
-mod cactus;
+use cactus_core as cactus;
+
+#[cfg(feature = "cactus")]
+impl captions::Transcriber for cactus::Whistle {
+    fn transcribe(&mut self, pcm16k: &[i16]) -> anyhow::Result<String> {
+        cactus::Transcriber::transcribe(self, pcm16k)
+    }
+}
+
 mod caption_controller;
 mod captions;
 mod devices;
@@ -14,7 +22,7 @@ mod tap;
 mod vad;
 
 #[cfg(feature = "cactus")]
-pub use cactus::Whistle;
+pub use cactus::{Agent, Cactus, Mirage, Models, Whistle};
 pub use caption_controller::{CaptionCallback, CaptionController};
 pub use captions::{Caption, CaptionLogger, SharedTranscriber, Transcriber, share_transcriber};
 pub use devices::{

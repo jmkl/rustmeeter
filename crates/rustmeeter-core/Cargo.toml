@@ -1,0 +1,21 @@
+[package]
+name = "rustmeeter-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cpal = "0.15"
+ringbuf = "0.3"
+biquad = "0.4"
+anyhow = "1"
+chrono = "0.4"
+serde_json = { version = "1", optional = true }
+cactus-core = { path = "../cactus-core", optional = true }
+
+[features]
+default = ["cactus"]
+cactus = ["dep:cactus-core", "dep:serde_json"]
+
+[lib]
+name = "rustmeeter_core"
+path = "src/lib.rs"

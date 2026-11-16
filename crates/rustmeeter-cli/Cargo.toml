@@ -1,0 +1,12 @@
+[package]
+name = "rustmeeter-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustmeeter-core = { path = "../rustmeeter-core" }
+anyhow = "1"
+
+[[bin]]
+name = "rustmeeter"
+path = "src/main.rs"

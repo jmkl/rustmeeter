@@ -14,9 +14,7 @@ fn main() {
     println!("cargo::rerun-if-env-changed=LLVM_MINGW_DIR");
     println!("cargo::rerun-if-env-changed=CACTUS_CXX_LIB");
 
-    if env::var_os("CARGO_FEATURE_CACTUS").is_none() {
-        return; // built with --no-default-features: no Cactus, no captions
-    }
+    // cactus-core always links the Cactus engine.
 
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let lib_dir = env::var_os("CACTUS_LIB_DIR")

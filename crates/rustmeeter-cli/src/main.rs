@@ -2,7 +2,7 @@
 //! so a GUI can be built the same way.
 
 use anyhow::{Result, anyhow, bail};
-use rustmeeter::*;
+use rustmeeter_core::*;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
