@@ -1,0 +1,30 @@
+[package]
+name = "rustmeeter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cpal = "0.15"
+ringbuf = "0.3"
+biquad = "0.4"
+anyhow = "1"
+chrono = "0.4"
+serde_json = { version = "1", optional = true }
+windows-reactor = {path = "../windows-rs/crates/libs/reactor", optional = true}
+
+[features]
+# Live captions via the Cactus static lib (cactus/libcactus.a). On by default.
+# Build without it: cargo build --release --no-default-features
+default = ["cactus"]
+cactus = ["dep:serde_json"]
+# GUI (windows-reactor): cargo run --release --features gui --bin rustmeeter-gui
+gui = ["dep:windows-reactor"]
+
+[[bin]]
+name = "rustmeeter-gui"
+path = "src/gui/main.rs"
+required-features = ["gui"]
+
+[profile.release]
+opt-level = 3
+lto = true

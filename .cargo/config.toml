@@ -1,0 +1,7 @@
+# Everything is built for gnullvm so Cactus' static C++ library links cleanly (see README).
+# Adjust the linker path if llvm-mingw lives somewhere else.
+[build]
+target = "x86_64-pc-windows-gnullvm"
+
+[target.x86_64-pc-windows-gnullvm]
+linker = "C:\\tools\\llvm-mingw\\bin\\x86_64-w64-mingw32-clang.exe"
