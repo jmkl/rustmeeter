@@ -18,6 +18,8 @@ const CAP_H: f64 = 16.0;
 const WELL_W: f64 = 52.0;
 const TRACK_W: f64 = 5.0;
 const LABEL_W: f64 = 30.0;
+/// Width of the level meter next to the groove.
+const METER_W: f64 = 12.0;
 
 /// Printed scale, top to bottom. The tick spacing is deliberately even while the dB steps are
 /// not, so the range around 0 dB gets most of the travel (a console-style fader taper).
@@ -130,7 +132,7 @@ pub(crate) fn fader(
         .children((
             scale,
             well.grid_column(1),
-            vmeter(level_db, FADER_H).grid_column(2),
+            vmeter(level_db, METER_W, FADER_H).grid_column(2),
         ))
         .into()
 }

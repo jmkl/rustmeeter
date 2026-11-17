@@ -249,9 +249,8 @@ impl Component for MixerApp {
 
         context.window_title("RustMeeter");
         // The EQ table sizes its columns from the client width, so track resizes.
-        context.on_window_size(
-            context.callback(|size: WindowSize| Message::WindowWidth(size.width)),
-        );
+        context
+            .on_window_size(context.callback(|size: WindowSize| Message::WindowWidth(size.width)));
         context.window_visuals(
             WindowVisuals::new()
                 .theme(WindowTheme::Dark)

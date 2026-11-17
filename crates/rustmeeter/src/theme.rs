@@ -154,35 +154,49 @@ pub(crate) fn run_state(running: bool) -> View {
         .into()
 }
 
-pub(crate) fn level_color(db: f32) -> Color {
-    if db > -6.0 {
-        RED
-    } else if db > -20.0 {
-        AMBER
-    } else {
-        GREEN
-    }
+/// Vertical segmented peak meter, in the style of a console LED ladder.
+///
+/// Segments are lit from the bottom up to `db`, and coloured by where they sit: green below
+/// -12 dB, amber above it. The scale runs from `METER_MIN_DB` (bottom) to 0 dB (top).
+pub(crate) fn vmeter(db: f32, width: f64, height: f64) -> Border {
+    const SEG_H: f64 = 4.0;
+    const SEG_GAP: f64 = 2.0;
+    let count = (((height + SEG_GAP) / (SEG_H + SEG_GAP)).floor() as usize).max(1);
+    let seg_h = (height - (count - 1) as f64 * SEG_GAP) / count as f64;
+
+    let segments: Vec<View> = (0..count)
+        .map(|i| {
+            let i = i as f64;
+            let centre = (i * (seg_h + SEG_GAP) + seg_h / 2.0) / height;
+            let seg_db = METER_MIN_DB + (centre * f64::from(METER_MAX_DB - METER_MIN_DB)) as f32;
+            let lit = db >= seg_db;
+            Border::new()
+                .width(width)
+                .height(seg_h)
+                .corner_radius(1.0)
+                .background(Brush::Solid(if lit {
+                    segment_color(seg_db)
+                } else {
+                    GROOVE
+                }))
+                .canvas_left(0.0)
+                .canvas_top(height - (i + 1.0) * seg_h - i * SEG_GAP)
+                .into()
+        })
+        .collect();
+
+    Border::new()
+        .width(width)
+        .height(height)
+        .corner_radius((width / 2.0).min(3.0))
+        .background(Brush::Solid(GROOVE))
+        .content(Canvas::new().width(width).height(height).children(segments))
 }
 
-/// Vertical peak meter next to a strip fader: a track with a bottom-aligned fill.
-pub(crate) fn vmeter(db: f32, height: f64) -> Border {
-    let level = ((db + 60.0) / 60.0).clamp(0.0, 1.0) as f64;
-    let fill = if level <= 0.0 {
-        0.0
-    } else {
-        (height * level).max(2.0)
-    };
-    Border::new()
-        .width(12.0)
-        .height(height)
-        .corner_radius(6.0)
-        .background(Brush::Solid(GROOVE))
-        .content(
-            Border::new()
-                .width(12.0)
-                .height(fill)
-                .corner_radius(6.0)
-                .vertical_alignment(VerticalAlignment::Bottom)
-                .background(Brush::Solid(level_color(db))),
-        )
+/// Bottom of the meter scale; `level_db()` is floored at -90, so anything quieter reads empty.
+const METER_MIN_DB: f32 = -60.0;
+const METER_MAX_DB: f32 = 0.0;
+
+fn segment_color(db: f32) -> Color {
+    if db >= -12.0 { AMBER } else { GREEN }
 }
