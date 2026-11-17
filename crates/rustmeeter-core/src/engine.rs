@@ -1,31 +1,34 @@
-//! Low-level audio engine (internal; use `Mixer` instead): N input strips -> per-strip gain/mute/3-band EQ -> 2 output buses (A, B).
+//! Low-level audio engine (internal; use `Mixer` instead): N input strips -> per-strip parametric EQ/gain/mute -> 2 output buses (A, B).
 //! Inputs can be real mics or WASAPI loopback (any output device used as a source).
 
 use crate::devices::{InputSource, find_input, find_output};
+use crate::eq::EQ_MAX_BANDS;
 use crate::events::{Event, EventHandler};
 use crate::params::{NUM_BUSES, Params, db_to_lin};
 use crate::tap::TapShared;
 use anyhow::{Result, anyhow, bail};
-use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz, Type};
+use biquad::{Biquad, Coefficients, DirectForm2Transposed};
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
 use ringbuf::{HeapConsumer, HeapProducer, HeapRb};
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 
-// ---------- EQ ----------
+// ---------- EQ stages (built from `EqSettings` on the output thread) ----------
 
-fn make_coeffs(band: usize, db: f32, fs: f32) -> Result<Coefficients<f32>, biquad::Errors> {
-    let (t, f0): (Type<f32>, f32) = match band {
-        0 => (Type::LowShelf(db), 120.0),
-        1 => (Type::PeakingEQ(db), 1000.0),
-        _ => (Type::HighShelf(db), 8000.0),
-    };
-    Coefficients::<f32>::from_params(t, fs.hz(), f0.hz(), Q_BUTTERWORTH_F32)
+struct EqStage {
+    enabled: bool,
+    filt: [DirectForm2Transposed<f32>; 2], // left, right
 }
 
-fn new_filter(band: usize, fs: f32) -> DirectForm2Transposed<f32> {
-    DirectForm2Transposed::<f32>::new(make_coeffs(band, 0.0, fs).expect("eq coeffs"))
+fn identity() -> Coefficients<f32> {
+    Coefficients {
+        a1: 0.0,
+        a2: 0.0,
+        b0: 1.0,
+        b1: 0.0,
+        b2: 0.0,
+    }
 }
 
 // ---------- per (strip, bus) reader: resample + EQ + gain, runs in output callback ----------
@@ -39,8 +42,9 @@ struct Reader {
     pos: f64,
     prev: [f32; 2],
     cur: [f32; 2],
-    filters: [[DirectForm2Transposed<f32>; 3]; 2],
-    last_eq: [f32; 3],
+    eq: Vec<EqStage>,
+    eq_bypass: bool,
+    eq_version: u32,
     meter: bool,
 }
 
@@ -52,8 +56,6 @@ impl Reader {
         out_rate: f32,
         meter: bool,
     ) -> Self {
-        let filters: [[DirectForm2Transposed<f32>; 3]; 2] =
-            std::array::from_fn(|_| std::array::from_fn(|b| new_filter(b, out_rate)));
         Self {
             cons,
             params,
@@ -63,28 +65,43 @@ impl Reader {
             pos: 0.0,
             prev: [0.0; 2],
             cur: [0.0; 2],
-            filters,
-            last_eq: [0.0; 3],
+            eq: Vec::with_capacity(EQ_MAX_BANDS), // no allocation on the audio thread later
+            eq_bypass: false,
+            eq_version: u32::MAX, // force a load on the first buffer
             meter,
         }
     }
 
+    /// Rebuild the filter chain when the strip's EQ changed. Keeps filter state for bands that
+    /// stay in place (no clicks while dragging a dot) and never blocks the audio thread.
     fn refresh_eq(&mut self) {
-        let now = [
-            self.params.eq_db[0].get(),
-            self.params.eq_db[1].get(),
-            self.params.eq_db[2].get(),
-        ];
-        if now != self.last_eq {
-            self.last_eq = now;
-            for c in 0..2 {
-                for b in 0..3 {
-                    if let Ok(co) = make_coeffs(b, now[b], self.out_rate) {
-                        self.filters[c][b].update_coefficients(co);
-                    }
-                }
+        if self.params.eq_version() == self.eq_version {
+            return;
+        }
+        let Some((version, settings)) = self.params.try_eq() else {
+            return; // a writer holds the lock this instant: retry next buffer
+        };
+        self.eq_version = version;
+        self.eq_bypass = settings.bypass;
+        let fs = self.out_rate;
+        for (i, band) in settings.bands.iter().enumerate() {
+            let enabled = band.enabled && band.coefficients(fs).is_some();
+            let co = || band.coefficients(fs).unwrap_or_else(identity);
+            if let Some(stage) = self.eq.get_mut(i) {
+                stage.enabled = enabled;
+                stage.filt[0].update_coefficients(co());
+                stage.filt[1].update_coefficients(co());
+            } else {
+                self.eq.push(EqStage {
+                    enabled,
+                    filt: [
+                        DirectForm2Transposed::<f32>::new(co()),
+                        DirectForm2Transposed::<f32>::new(co()),
+                    ],
+                });
             }
         }
+        self.eq.truncate(settings.bands.len());
     }
 
     fn mix_into(&mut self, out: &mut [f32], frames: usize) {
@@ -123,8 +140,12 @@ impl Reader {
             let t = self.pos as f32;
             for c in 0..2 {
                 let mut x = self.prev[c] + (self.cur[c] - self.prev[c]) * t;
-                for b in 0..3 {
-                    x = self.filters[c][b].run(x);
+                if !self.eq_bypass {
+                    for stage in self.eq.iter_mut() {
+                        if stage.enabled {
+                            x = stage.filt[c].run(x);
+                        }
+                    }
                 }
                 x *= g;
                 peak = peak.max(x.abs());

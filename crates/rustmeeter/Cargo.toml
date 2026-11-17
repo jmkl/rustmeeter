@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 rustmeeter-core = { path = "../rustmeeter-core" }
 anyhow = "1"
+windows-canvas = { path = "../../../windows-rs/crates/libs/canvas", default-features = false, features = ["reactor"] }
 windows-reactor = { path = "../../../windows-rs/crates/libs/reactor" }
 
 [features]

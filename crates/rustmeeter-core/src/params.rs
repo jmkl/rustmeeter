@@ -1,14 +1,13 @@
 //! Lock-free parameters shared between the audio threads and any control surface (CLI, GUI, MIDI...).
 //! `Params` is `Send + Sync`; clone the `Arc<Params>` freely and call the setters from any thread.
 
+use crate::eq::EqSettings;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
+use std::sync::{Arc, Mutex};
 
 pub const NUM_BUSES: usize = 2;
-pub const EQ_BANDS: usize = 3;
-pub const EQ_BAND_NAMES: [&str; EQ_BANDS] = ["low", "mid", "high"];
 pub const MIN_DB: f32 = -60.0;
 pub const MAX_DB: f32 = 12.0;
-pub const EQ_RANGE_DB: f32 = 12.0;
 
 pub(crate) struct AtomicF32(AtomicU32);
 impl AtomicF32 {
@@ -27,7 +26,10 @@ impl AtomicF32 {
 pub struct Params {
     pub(crate) gain_db: AtomicF32,
     pub(crate) mute: AtomicBool,
-    pub(crate) eq_db: [AtomicF32; EQ_BANDS], // low shelf 120 Hz, peak 1 kHz, high shelf 8 kHz
+    // Parametric EQ. Shared as an immutable snapshot: writers (UI/CLI) swap in a new `Arc`; the audio
+    // thread polls `eq_version` and, only when it changed, `try_lock`s the state (never blocks).
+    eq_state: Mutex<(u32, Arc<EqSettings>)>,
+    eq_version: AtomicU32,
     pub(crate) routes: [AtomicBool; NUM_BUSES],
     pub(crate) level: AtomicF32, // linear peak, written by the audio thread
 }
@@ -37,11 +39,8 @@ impl Params {
         Self {
             gain_db: AtomicF32::new(0.0),
             mute: AtomicBool::new(false),
-            eq_db: [
-                AtomicF32::new(0.0),
-                AtomicF32::new(0.0),
-                AtomicF32::new(0.0),
-            ],
+            eq_state: Mutex::new((0, Arc::new(EqSettings::default()))),
+            eq_version: AtomicU32::new(0),
             routes: [AtomicBool::new(routes[0]), AtomicBool::new(routes[1])],
             level: AtomicF32::new(0.0),
         }
@@ -61,12 +60,39 @@ impl Params {
         self.mute.store(m, Relaxed)
     }
 
-    /// and: 0 = low, 1 = mid, 2 = high.
-    pub fn eq_db(&self, band: usize) -> f32 {
-        self.eq_db[band].get()
+    /// Current parametric EQ (cheap: clones an `Arc`).
+    pub fn eq(&self) -> Arc<EqSettings> {
+        self.eq_state.lock().unwrap_or_else(|e| e.into_inner()).1.clone()
     }
-    pub fn set_eq_db(&self, band: usize, db: f32) {
-        self.eq_db[band].set(db.clamp(-EQ_RANGE_DB, EQ_RANGE_DB));
+
+    /// Replace the whole EQ. Settings are clamped (`EqSettings::sanitize`) and take effect on the
+    /// next audio buffer, with no stream restart.
+    pub fn set_eq(&self, mut settings: EqSettings) {
+        settings.sanitize();
+        let version = {
+            let mut g = self.eq_state.lock().unwrap_or_else(|e| e.into_inner());
+            g.0 = g.0.wrapping_add(1);
+            g.1 = Arc::new(settings);
+            g.0
+        };
+        self.eq_version.store(version, Relaxed);
+    }
+
+    /// Read-modify-write helper: `params.update_eq(|eq| eq.bypass = true)`.
+    pub fn update_eq(&self, f: impl FnOnce(&mut EqSettings)) {
+        let mut settings = (*self.eq()).clone();
+        f(&mut settings);
+        self.set_eq(settings);
+    }
+
+    pub(crate) fn eq_version(&self) -> u32 {
+        self.eq_version.load(Relaxed)
+    }
+
+    /// Audio-thread read: `None` if a writer holds the lock right now (retry next buffer).
+    pub(crate) fn try_eq(&self) -> Option<(u32, Arc<EqSettings>)> {
+        let g = self.eq_state.try_lock().ok()?;
+        Some((g.0, g.1.clone()))
     }
 
     pub fn routed(&self, bus: usize) -> bool {

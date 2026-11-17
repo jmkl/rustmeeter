@@ -668,6 +668,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "rustmeeter-core",
+ "windows-canvas",
  "windows-reactor",
 ]
 
@@ -949,10 +950,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-canvas"
+version = "0.101.0"
+dependencies = [
+ "windows-composition",
+ "windows-core 0.101.0",
+ "windows-numerics",
+ "windows-reactor",
+ "windows-text",
+]
+
+[[package]]
 name = "windows-collections"
 version = "0.101.0"
 dependencies = [
  "windows-core 0.101.0",
+]
+
+[[package]]
+name = "windows-composition"
+version = "0.101.0"
+dependencies = [
+ "windows-collections",
+ "windows-core 0.101.0",
+ "windows-numerics",
+ "windows-time",
 ]
 
 [[package]]
@@ -1026,6 +1048,13 @@ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 [[package]]
 name = "windows-link"
 version = "0.100.1"
+
+[[package]]
+name = "windows-numerics"
+version = "0.101.0"
+dependencies = [
+ "windows-core 0.101.0",
+]
 
 [[package]]
 name = "windows-reactor"
@@ -1136,6 +1165,14 @@ dependencies = [
  "windows_x86_64_gnu 0.52.6",
  "windows_x86_64_gnullvm 0.52.6",
  "windows_x86_64_msvc 0.52.6",
+]
+
+[[package]]
+name = "windows-text"
+version = "0.101.0"
+dependencies = [
+ "windows-core 0.101.0",
+ "windows-numerics",
 ]
 
 [[package]]

@@ -34,7 +34,10 @@ commands (strips are numbered 1.., buses are 'a' and 'b'):
   levels | l                      show meters once
   gain <strip|a|b> <db>           e.g. gain 2 -6
   mute <strip|a|b> [on|off]       toggles if on/off omitted
-  eq <strip> <low|mid|high> <db>  -12..12
+  eq <strip> show                 list the parametric EQ bands
+  eq <strip> add <hp|ls|bell|hs|lp> <hz> [gain_db] [q]
+  eq <strip> set <n> <freq|gain|q|type|on> <value>
+  eq <strip> remove <n> | reset | bypass <on|off>
   route <strip> <a|b> <on|off>
   add <mic|loop> <device>[:AB]    add a strip (restarts audio)
   remove <strip>                  remove a strip (restarts audio)
@@ -370,17 +373,7 @@ fn handle(m: &mut Mixer, caps: &mut CaptionController, p: &[&str]) -> Result<boo
             };
             t.set_muted(new);
         }
-        "eq" => {
-            if p.len() != 4 {
-                bail!("usage: eq <strip> <low|mid|high> <db>");
-            }
-            let t = strip_params(m, p[1])?;
-            let band = EQ_BAND_NAMES
-                .iter()
-                .position(|b| *b == p[2])
-                .ok_or_else(|| anyhow!("band must be low, mid or high"))?;
-            t.set_eq_db(band, p[3].parse()?);
-        }
+        "eq" => handle_eq(m, &p[1..])?,
         "route" => {
             if p.len() != 4 {
                 bail!("usage: route <strip> <a|b> <on|off>");
@@ -446,6 +439,112 @@ fn db_str(db: f32) -> String {
     }
 }
 
+const EQ_USAGE: &str = "usage:
+  eq <strip> show
+  eq <strip> add <hp|ls|bell|hs|lp> <hz> [gain_db] [q]
+  eq <strip> set <n> <freq|gain|q|type|on> <value>
+  eq <strip> remove <n>
+  eq <strip> bypass <on|off>
+  eq <strip> reset";
+
+/// Parametric EQ commands. Bands are numbered from 1 (same order as the GUI table).
+fn handle_eq(m: &Mixer, a: &[&str]) -> Result<()> {
+    if a.len() < 2 {
+        bail!("{EQ_USAGE}");
+    }
+    let p = strip_params(m, a[0])?;
+    match a[1] {
+        "show" => {}
+        "add" => {
+            if a.len() < 4 {
+                bail!("{EQ_USAGE}");
+            }
+            let kind = EqKind::parse(a[2])
+                .ok_or_else(|| anyhow!("type must be hp, ls, bell, hs or lp"))?;
+            let freq: f32 = a[3].parse()?;
+            let gain: f32 = a.get(4).map(|v| v.parse()).transpose()?.unwrap_or(0.0);
+            let mut band = EqBand::new(kind, freq, gain);
+            if let Some(q) = a.get(5) {
+                band.q = q.parse()?;
+            }
+            let mut added = false;
+            p.update_eq(|s| added = s.add(band));
+            if !added {
+                bail!("at most {EQ_MAX_BANDS} bands");
+            }
+        }
+        "set" => {
+            if a.len() != 5 {
+                bail!("{EQ_USAGE}");
+            }
+            let n: usize = a[2].parse()?;
+            let idx = n
+                .checked_sub(1)
+                .ok_or_else(|| anyhow!("bands are numbered from 1"))?;
+            let mut band = *p
+                .eq()
+                .bands
+                .get(idx)
+                .ok_or_else(|| anyhow!("no band {n}"))?;
+            match a[3] {
+                "freq" => band.freq_hz = a[4].parse()?,
+                "gain" => band.gain_db = a[4].parse()?,
+                "q" => band.q = a[4].parse()?,
+                "type" => {
+                    band.kind = EqKind::parse(a[4])
+                        .ok_or_else(|| anyhow!("type must be hp, ls, bell, hs or lp"))?
+                }
+                "on" => band.enabled = parse_on_off(a[4])?,
+                _ => bail!("{EQ_USAGE}"),
+            }
+            p.update_eq(|s| {
+                if let Some(b) = s.bands.get_mut(idx) {
+                    *b = band;
+                }
+            });
+        }
+        "remove" => {
+            let n: usize = a.get(2).ok_or_else(|| anyhow!("{EQ_USAGE}"))?.parse()?;
+            let idx = n
+                .checked_sub(1)
+                .ok_or_else(|| anyhow!("bands are numbered from 1"))?;
+            if idx >= p.eq().bands.len() {
+                bail!("no band {n}");
+            }
+            p.update_eq(|s| {
+                s.bands.remove(idx);
+            });
+        }
+        "bypass" => {
+            let on = parse_on_off(a.get(2).ok_or_else(|| anyhow!("{EQ_USAGE}"))?)?;
+            p.update_eq(|s| s.bypass = on);
+        }
+        "reset" => p.set_eq(EqSettings::default()),
+        _ => bail!("{EQ_USAGE}"),
+    }
+    print_eq(&p.eq());
+    Ok(())
+}
+
+fn print_eq(s: &EqSettings) {
+    println!(
+        "EQ{}: {} band(s)",
+        if s.bypass { " (bypassed)" } else { "" },
+        s.bands.len()
+    );
+    for (i, b) in s.bands.iter().enumerate() {
+        println!(
+            "  {}. [{}] {:<10} {:>8.1} Hz  {:>+6.1} dB  Q {:.2}",
+            i + 1,
+            if b.enabled { "on " } else { "off" },
+            b.kind.label(),
+            b.freq_hz,
+            b.gain_db,
+            b.q
+        );
+    }
+}
+
 fn print_status(m: &Mixer) {
     for b in 0..NUM_BUSES {
         let bus = m.bus(b);
@@ -461,16 +560,15 @@ fn print_status(m: &Mixer) {
     for (i, s) in m.strips().iter().enumerate() {
         let p = &s.params;
         println!(
-            "[{}] {:<44} ->{}{}  gain {} dB{}  eq L{:+.0} M{:+.0} H{:+.0}  level {} dB",
+            "[{}] {:<44} ->{}{}  gain {} dB{}  eq {} band(s){}  level {} dB",
             i + 1,
             s.source.label(),
             if p.routed(0) { "A" } else { "-" },
             if p.routed(1) { "B" } else { "-" },
             db_str(p.gain_db()),
             if p.muted() { " [MUTED]" } else { "" },
-            p.eq_db(0),
-            p.eq_db(1),
-            p.eq_db(2),
+            p.eq().active_bands(),
+            if p.eq().bypass { " (bypass)" } else { "" },
             db_str(p.level_db()),
         );
     }

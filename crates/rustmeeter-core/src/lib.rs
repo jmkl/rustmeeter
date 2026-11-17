@@ -15,6 +15,7 @@ mod caption_controller;
 mod captions;
 mod devices;
 mod engine;
+mod eq;
 mod events;
 mod mixer;
 mod params;
@@ -28,8 +29,12 @@ pub use captions::{Caption, CaptionLogger, SharedTranscriber, Transcriber, share
 pub use devices::{
     InputSource, default_input_name, default_output_name, list_inputs, list_outputs,
 };
+pub use eq::{
+    EQ_FREQ_MAX, EQ_FREQ_MIN, EQ_GAIN_MAX, EQ_GAIN_MIN, EQ_MAX_BANDS, EQ_Q_MAX, EQ_Q_MIN, EqBand,
+    EqKind, EqSettings,
+};
 pub use events::{Event, EventHandler};
 pub use mixer::{Bus, BusView, Mixer, MixerView, Strip, StripId, StripView};
-pub use params::{EQ_BAND_NAMES, EQ_BANDS, EQ_RANGE_DB, MAX_DB, MIN_DB, NUM_BUSES, Params};
+pub use params::{MAX_DB, MIN_DB, NUM_BUSES, Params};
 pub use tap::{TAP_RATE, Tap};
 pub use vad::{Segmenter, Utterance};

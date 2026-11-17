@@ -12,7 +12,8 @@
 use crate::devices::InputSource;
 use crate::engine::{BusSpec, Engine, StripSpec};
 use crate::events::{Event, EventHandler, default_handler};
-use crate::params::{EQ_BANDS, NUM_BUSES, Params};
+use crate::eq::EqSettings;
+use crate::params::{NUM_BUSES, Params};
 use crate::tap::{Tap, TapShared};
 use anyhow::Result;
 use std::sync::Arc;
@@ -42,7 +43,7 @@ pub struct StripView {
     pub routes: [bool; NUM_BUSES],
     pub gain_db: f32,
     pub muted: bool,
-    pub eq_db: [f32; EQ_BANDS],
+    pub eq: Arc<EqSettings>,
     pub params: Arc<Params>,
 }
 
@@ -167,7 +168,7 @@ impl Mixer {
                     routes: std::array::from_fn(|b| s.params.routed(b)),
                     gain_db: s.params.gain_db(),
                     muted: s.params.muted(),
-                    eq_db: std::array::from_fn(|b| s.params.eq_db(b)),
+                    eq: s.params.eq(),
                     params: s.params.clone(),
                 })
                 .collect(),

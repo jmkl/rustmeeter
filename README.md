@@ -4,7 +4,7 @@ A small Voicemeeter-style audio mixer for Windows, in Rust. No driver of its own
 real devices (and VB-Cable) and has a live speech-to-text caption logger built on Cactus Whistle.
 
 - Strips: any mic, or **[Loopback]** of any output device (captures what that device plays)
-- Per strip: gain, mute, 3-band EQ, routing to bus A and/or B, level meter
+- Per strip: gain, mute, **parametric EQ** (up to 10 bands), routing to bus A and/or B, level meter
 - Two output buses (A, B), each to any output device, with master gain/mute/meter
 - **Live captions**: a passive copy of one strip is cut into utterances and transcribed
   in-process by Whistle into `captions.log`. Toggle on/off at runtime. Discord/OBS never notice.
@@ -103,7 +103,8 @@ routed only to B is still transcribed. "First mic" means the first strip that is
 |---|---|
 | `status` / `levels` | show everything / meters |
 | `gain <strip\|a\|b> <db>`, `mute <strip\|a\|b> [on\|off]` | instant |
-| `eq <strip> <low\|mid\|high> <db>` | instant |
+| `eq <strip> show` / `add <hp\|ls\|bell\|hs\|lp> <hz> [gain] [q]` | instant, see "Parametric EQ" |
+| `eq <strip> set <n> <freq\|gain\|q\|type\|on> <value>` / `remove <n>` / `reset` / `bypass <on\|off>` | instant |
 | `route <strip> <a\|b> <on\|off>` | instant |
 | `add <mic\|loop> <device>[:AB]`, `remove <strip>`, `bus <a\|b> <device\|none>` | restarts audio briefly |
 | `captions on [strip]`, `captions off`, `captions` | live captions, instant, no audio restart |
@@ -123,6 +124,34 @@ rustmeeter run ... --mic "Headset Microphone (MH752)" --captions captions.log --
   `--caption-threads 2` caps the transcriber's CPU use.
 - Captioning a `[Loopback]` strip transcribes the other people in a call. Check consent rules
   before logging other people's voices.
+
+
+## Parametric EQ
+
+Every strip has its own EQ: up to **10 bands**, each with a type (**High-Pass, Low-Shelf, Bell, High-Shelf,
+Low-Pass**), frequency (20 Hz to 20 kHz), gain (±15 dB, not for the pass filters), Q (0.1 to 10) and an on/off
+switch, plus a bypass for the whole EQ. It is applied to that strip's audio on every bus it feeds.
+Changes take effect on the next audio buffer with no stream restart, and filter state is kept while you
+drag, so there are no clicks.
+
+**GUI:** press the **EQ** button on a strip card and the editor expands next to the strip.
+- Click empty graph space to add a Bell band there; drag a dot sideways for frequency, up/down for gain.
+- Right-click a dot to remove it. The numbered rows below edit type, gain, Q and frequency (Q and frequency are
+  logarithmic sliders), the `On` chip toggles a band, `x` removes it, `+ Add band` adds a flat Bell, `Reset` clears all.
+- The blue curve is the combined response of the enabled bands (computed from the real filter coefficients).
+
+**CLI:** bands are numbered from 1, in the same order as the GUI table.
+```
+eq 1 add hp 80                 # high-pass at 80 Hz
+eq 1 add bell 3000 4 1.2       # +4 dB bell at 3 kHz, Q 1.2
+eq 1 set 2 gain 2.5            # change band 2
+eq 1 set 1 on off              # switch band 1 off
+eq 1 show                      # list bands
+eq 1 bypass on                 # A/B the whole EQ
+eq 1 reset
+```
+**Code:** `rustmeeter-core/src/eq.rs` (model, filter design, curve), `Params::eq()/set_eq()/update_eq()`,
+`engine.rs` (`Reader::refresh_eq`). `cargo test -p rustmeeter-core` checks the filter responses.
 
 ## 4. Troubleshooting
 
@@ -190,7 +219,7 @@ the rest up with the device pickers and "Add input".
 
 - **Toolbar**: Start/Stop, "Refresh devices", bus A and bus B device pickers (both include `None`),
   "Add input" (mics and `[Loopback]` sources), and the caption controls.
-- **Strip cards**: source name, A/B route checkboxes, 3-band EQ sliders (±12 dB), fader with a dB
+- **Strip cards**: source name, A/B route checkboxes, an **EQ** button (opens the parametric EQ editor), fader with a dB
   readout, mute, level meter, remove.
 - **Bus cards**: bus name, device, and the same fader (gain, mute, meter).
 - **Transcript**: the last 500 captions, also written to `captions.log`; errors show up in an info
