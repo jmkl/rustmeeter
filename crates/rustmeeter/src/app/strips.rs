@@ -7,6 +7,7 @@ use windows_reactor::*;
 
 use super::MixerApp;
 use super::eq::eq_button;
+use crate::fader::fader;
 use crate::messages::Message;
 use crate::theme::*;
 use crate::util::*;
@@ -111,33 +112,18 @@ impl MixerApp {
         );
 
         let gain = params.clone();
-        body.push(
-            Grid::new()
-                .columns([
-                    GridLength::STAR,
-                    GridLength::Auto,
-                    GridLength::Auto,
-                    GridLength::STAR,
-                ])
-                .column_spacing(8.0)
-                .children((
-                    Slider::new()
-                        .grid_column(1)
-                        .orientation(Orientation::Vertical)
-                        .height(76.0)
-                        .minimum(f64::from(MIN_DB))
-                        .maximum(f64::from(MAX_DB))
-                        .step_frequency(0.5)
-                        .value(f64::from(params.gain_db()))
-                        .on_value_changed(move |v: f64| gain.set_gain_db(v as f32)),
-                    vmeter(params.level_db(), 76.0).grid_column(2),
-                ))
-                .into(),
-        );
+        body.push(fader(params.gain_db(), params.level_db(), move |db| {
+            gain.set_gain_db(db)
+        }));
 
+        let gain_db = zeroed(params.gain_db());
         body.push(
             TextBlock::new()
-                .text(format!("{:+.1} dB", zeroed(params.gain_db())))
+                .text(if gain_db == 0.0 {
+                    "0.0 dB".to_string()
+                } else {
+                    format!("{gain_db:+.1} dB")
+                })
                 .font_size(10.0)
                 .foreground(Brush::Solid(DIM))
                 .horizontal_alignment(HorizontalAlignment::Center)

@@ -16,10 +16,14 @@
 //! Module map:
 //! - [`app`]        component state, lifecycle and layout (one file per panel)
 //! - [`messages`]   messages posted to the UI thread
+//! - [`fader`]      custom channel fader (dB scale, groove, cap) plus its level meter
+//! - [`hslider`]    compact horizontal slider used by bus faders and the EQ table
 //! - [`theme`]      palette and reusable view builders
 //! - [`util`]       small display/domain helpers
 
 mod app;
+mod fader;
+mod hslider;
 mod messages;
 mod theme;
 mod util;

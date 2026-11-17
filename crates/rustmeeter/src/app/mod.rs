@@ -19,7 +19,7 @@ use rustmeeter_core::*;
 use windows_canvas::Invalidator;
 use windows_reactor::*;
 
-use self::eq::EqDrag;
+use self::eq::{EqDrag, MODAL_PAD};
 use crate::messages::Message;
 use crate::theme::*;
 
@@ -42,6 +42,8 @@ pub(crate) struct MixerApp {
     eq_drag: Option<EqDrag>,
     /// Repaint requests for the open EQ graph's Direct2D canvas (see `draw_eq_curve`).
     eq_invalidator: Invalidator,
+    /// Window client width in DIPs; sizes the EQ band table (see `eq_table_width`).
+    window_w: f64,
 }
 
 impl MixerApp {
@@ -128,6 +130,7 @@ impl Component for MixerApp {
             eq_open: None,
             eq_drag: None,
             eq_invalidator: Invalidator::new(),
+            window_w: 940.0,
         };
         app.start();
         app
@@ -205,6 +208,7 @@ impl Component for MixerApp {
                 self.caps.off();
             }
             Message::DismissError => self.error = None,
+            Message::WindowWidth(width) => self.window_w = width,
             Message::ToggleEq(id) => {
                 self.eq_open = if self.eq_open == Some(id) {
                     None
@@ -244,6 +248,10 @@ impl Component for MixerApp {
         let view = self.mixer.snapshot();
 
         context.window_title("RustMeeter");
+        // The EQ table sizes its columns from the client width, so track resizes.
+        context.on_window_size(
+            context.callback(|size: WindowSize| Message::WindowWidth(size.width)),
+        );
         context.window_visuals(
             WindowVisuals::new()
                 .theme(WindowTheme::Dark)
@@ -309,7 +317,7 @@ impl Component for MixerApp {
                     content,
                     Border::new()
                         .background(Brush::Solid(MODAL))
-                        .padding(Thickness::uniform(14.0))
+                        .padding(Thickness::uniform(MODAL_PAD))
                         .content(self.eq_card(index, &view.strips[index], context)),
                 ))
                 .into(),

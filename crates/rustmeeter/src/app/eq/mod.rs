@@ -23,6 +23,10 @@ use crate::theme::*;
 // `EQ_W` must fit the smallest window (760 px) once the content padding is subtracted.
 const EQ_W: f64 = 660.0;
 const EQ_H: f64 = 240.0;
+/// Padding of the modal card; `app` uses it so the table can subtract the same value.
+pub(super) const MODAL_PAD: f64 = 14.0;
+/// Room reserved on the right of the band table for its vertical scrollbar.
+const SCROLLBAR_W: f64 = 18.0;
 /// Response curve resolution: `EQ_COLS + 1` samples across `EQ_W` (lower = cheaper to redraw).
 const EQ_COLS: usize = 160;
 /// Sample rate used only to draw the curve.
@@ -149,12 +153,18 @@ impl MixerApp {
         });
     }
 
+    /// Width of the band table: the modal fills the window, minus its padding and the scrollbar.
+    fn eq_table_width(&self) -> f64 {
+        (self.window_w - 2.0 * MODAL_PAD - SCROLLBAR_W).max(480.0)
+    }
+
     /// Parametric EQ editor for one strip: response graph with draggable dots, plus a band table.
     pub(crate) fn eq_card(&self, index: usize, s: &StripView, context: &ViewContext<Self>) -> View {
         let id = s.id;
         let params = &s.params;
         let eq = &s.eq;
         let bypass = eq.bypass;
+        let table_w = self.eq_table_width();
 
         // ---- header: title, bypass, close
         let header = {
@@ -292,7 +302,7 @@ impl MixerApp {
 
         // ---- table: one row per band
         let table_header = Grid::new()
-            .columns(eq_columns())
+            .columns(eq_columns(table_w))
             .column_spacing(4.0)
             .children((
                 eq_head("#", 0),
@@ -305,7 +315,7 @@ impl MixerApp {
             .bands
             .iter()
             .enumerate()
-            .map(|(i, b)| keyed(i as u64, eq_row(params, i, b)))
+            .map(|(i, b)| keyed(i as u64, eq_row(params, i, b, table_w)))
             .collect();
         let table_body: View = if rows.is_empty() {
             TextBlock::new()
@@ -317,6 +327,7 @@ impl MixerApp {
             StackPanel::new().spacing(3.0).keyed_children(rows).into()
         };
         let table = ScrollViewer::new()
+            .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
             .vertical_scroll_bar_visibility(ScrollBarVisibility::Auto)
             .content(table_body);
 

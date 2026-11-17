@@ -17,6 +17,8 @@ pub(crate) enum Message {
     CaptionsOn,
     CaptionsOff,
     DismissError,
+    /// Client width in DIPs, so the EQ table can size its columns to the window.
+    WindowWidth(f64),
     // Parametric EQ editor.
     ToggleEq(StripId),
     EqPress {

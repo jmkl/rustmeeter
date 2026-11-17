@@ -8,7 +8,6 @@ pub(crate) const CARD: Color = Color::argb(0x14, 0xFF, 0xFF, 0xFF);
 pub(crate) const CARD_EDGE: Color = Color::argb(0x22, 0xFF, 0xFF, 0xFF);
 pub(crate) const WELL: Color = Color::argb(0x33, 0x00, 0x00, 0x00);
 pub(crate) const FILL_OFF: Color = Color::argb(0x2A, 0xFF, 0xFF, 0xFF);
-pub(crate) const TRACK: Color = Color::argb(0x2E, 0xFF, 0xFF, 0xFF);
 /// Very light scrim so text stays readable over a bright wallpaper.
 pub(crate) const SCRIM: Color = Color::argb(0x40, 0x00, 0x00, 0x00);
 /// Backdrop of the full-window EQ editor: near-opaque, so the mixer behind it is out of the way.
@@ -22,6 +21,11 @@ pub(crate) const BLUE: Color = Color::rgb(0x60, 0xA5, 0xFA);
 pub(crate) const AMBER: Color = Color::rgb(0xFB, 0xBF, 0x24);
 pub(crate) const RED: Color = Color::rgb(0xF8, 0x71, 0x71);
 pub(crate) const RED_STRONG: Color = Color::rgb(0xDC, 0x26, 0x26);
+/// Channel fader: cyan level fill, the cap it drives and the groove it rides in.
+pub(crate) const CYAN: Color = Color::rgb(0x3F, 0xC9, 0xE8);
+pub(crate) const CAP: Color = Color::rgb(0xC9, 0xD2, 0xDC);
+pub(crate) const CAP_EDGE: Color = Color::argb(0xE6, 0x0A, 0x12, 0x1A);
+pub(crate) const GROOVE: Color = Color::rgb(0x10, 0x15, 0x1E);
 
 /// Translucent, rounded panel used for every group.
 pub(crate) fn card(child: impl Into<View>) -> Border {
@@ -172,7 +176,7 @@ pub(crate) fn vmeter(db: f32, height: f64) -> Border {
         .width(12.0)
         .height(height)
         .corner_radius(6.0)
-        .background(Brush::Solid(TRACK))
+        .background(Brush::Solid(GROOVE))
         .content(
             Border::new()
                 .width(12.0)

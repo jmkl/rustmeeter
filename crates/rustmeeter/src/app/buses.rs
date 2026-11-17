@@ -5,8 +5,12 @@ use windows_reactor::*;
 
 use super::MixerApp;
 use super::strips::mute_chip;
+use crate::hslider::hslider;
 use crate::theme::*;
 use crate::util::*;
+
+/// The side column is a fixed 300 px; this leaves a small margin inside the card.
+const BUS_SLIDER_W: f64 = 260.0;
 
 impl MixerApp {
     pub(crate) fn side(&self, view: &MixerView) -> View {
@@ -71,16 +75,17 @@ impl MixerApp {
                     .text_alignment(TextAlignment::Right)
                     .width(32.0)
                     .vertical_alignment(VerticalAlignment::Center),
-                Slider::new()
-                    .grid_row(1)
-                    .grid_column_span(4)
-                    .height(24.0)
-                    .min_height(24.0)
-                    .minimum(f64::from(MIN_DB))
-                    .maximum(f64::from(MAX_DB))
-                    .step_frequency(0.5)
-                    .value(f64::from(p.gain_db()))
-                    .on_value_changed(move |v: f64| gain.set_gain_db(v as f32)),
+                hslider(
+                    BUS_SLIDER_W,
+                    f64::from(p.gain_db()),
+                    f64::from(MIN_DB),
+                    f64::from(MAX_DB),
+                    0.5,
+                    true,
+                    move |v| gain.set_gain_db(v as f32),
+                )
+                .grid_row(1)
+                .grid_column_span(4),
                 ProgressBar::new()
                     .grid_row(2)
                     .grid_column_span(4)
