@@ -21,8 +21,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rustmeeter_core::*;
-use windows_canvas::{ColorF, DrawContext, Invalidator, PathBuilder, Vector2, canvas_invalidated};
+use windows_canvas::{ColorF, DrawContext, Invalidator, PathBuilder, Rect, Vector2, canvas_invalidated};
 use windows_reactor::*;
+use windows_text::TextFormat;
 
 const MAX_LINES: usize = 500;
 /// Meter refresh period (~30 fps).
@@ -37,6 +38,8 @@ const FILL_OFF: Color = Color::argb(0x2A, 0xFF, 0xFF, 0xFF);
 const TRACK: Color = Color::argb(0x2E, 0xFF, 0xFF, 0xFF);
 /// Very light scrim so text stays readable over a bright wallpaper.
 const SCRIM: Color = Color::argb(0x40, 0x00, 0x00, 0x00);
+/// Backdrop of the full-window EQ editor: near-opaque, so the mixer behind it is out of the way.
+const MODAL: Color = Color::argb(0xF2, 0x0E, 0x12, 0x1A);
 const DIM: Color = Color::argb(0xB4, 0xFF, 0xFF, 0xFF);
 const TEXT: Color = Color::argb(0xE6, 0xFF, 0xFF, 0xFF);
 const INK: Color = Color::rgb(0x0A, 0x12, 0x1A);
@@ -48,13 +51,15 @@ const RED: Color = Color::rgb(0xF8, 0x71, 0x71);
 const RED_STRONG: Color = Color::rgb(0xDC, 0x26, 0x26);
 
 // Parametric EQ editor geometry. The plot spans 20 Hz..20 kHz (3 decades, log) and +-15 dB.
-const EQ_W: f64 = 560.0;
-const EQ_H: f64 = 150.0;
+// `EQ_W` must fit the smallest window (760 px) once the content padding is subtracted.
+const EQ_W: f64 = 660.0;
+const EQ_H: f64 = 240.0;
 /// Response curve resolution: `EQ_COLS + 1` samples across `EQ_W` (lower = cheaper to redraw).
-const EQ_COLS: usize = 112;
+const EQ_COLS: usize = 160;
 /// Sample rate used only to draw the curve.
 const EQ_FS: f32 = 48_000.0;
-const EQ_TABLE_H: f64 = 120.0;
+/// Solid background of the EQ graph. The canvas surface is opaque, so it paints the well itself.
+const EQ_WELL: ColorF = ColorF::from_rgba8(0x0A, 0x0D, 0x14, 0xFF);
 const DOT: f64 = 16.0;
 /// A press this close (px) to an existing dot never adds a new band.
 const DOT_HIT: f64 = 14.0;
@@ -479,6 +484,33 @@ impl Component for MixerApp {
             .column_spacing(8.0)
             .keyed_children(rows);
 
+        let content: View = Border::new()
+            .background(Brush::Solid(SCRIM))
+            .padding(Thickness::uniform(10.0))
+            .content(body)
+            .into();
+
+        // The EQ editor is a modal: it covers the whole content area (everything below the title
+        // bar) instead of expanding next to the strip it belongs to. Both children share the same
+        // cell of a one-cell `Grid`, so the overlay paints on top of the mixer.
+        let stage: View = match self
+            .eq_open
+            .and_then(|id| view.strips.iter().position(|s| s.id == id))
+        {
+            Some(index) => Grid::new()
+                .rows([GridLength::STAR])
+                .columns([GridLength::STAR])
+                .children((
+                    content,
+                    Border::new()
+                        .background(Brush::Solid(MODAL))
+                        .padding(Thickness::uniform(14.0))
+                        .content(self.eq_card(index, &view.strips[index], context)),
+                ))
+                .into(),
+            None => content,
+        };
+
         Grid::new()
             .rows([GridLength::Auto, GridLength::STAR])
             .children((
@@ -486,11 +518,7 @@ impl Component for MixerApp {
                     .title("RustMeeter")
                     .subtitle("mixer · live captions")
                     .right_header(run_state(view.running)),
-                Border::new()
-                    .grid_row(1)
-                    .background(Brush::Solid(SCRIM))
-                    .padding(Thickness::uniform(10.0))
-                    .content(body),
+                Border::new().grid_row(1).content(stage),
             ))
             .into()
     }
@@ -636,13 +664,6 @@ impl MixerApp {
                 u64::from(strip.id),
                 self.strip_card(index, strip, context),
             ));
-            // The EQ editor expands right next to the strip it belongs to.
-            if self.eq_open == Some(strip.id) {
-                cards.push(keyed(
-                    (1u64 << 32) | u64::from(strip.id),
-                    self.eq_card(index, strip, context),
-                ));
-            }
         }
         let content: View = if cards.is_empty() {
             card(
@@ -839,43 +860,16 @@ impl MixerApp {
                 ))
         };
 
-        // ---- plot: grid, response curve, dots (all positioned on a Canvas).
-        // A Canvas reconciles its children positionally (unlike Grid/StackPanel, which are keyed),
-        // so the plot is built in a stable order: grid, labels, then the curve canvas, then the
-        // bands' dots last. Adding or removing a band only appends or drops at the tail, so a
-        // pointer-captured dot is never recycled as a curve column.
+        // ---- plot: one Direct2D canvas (well, grid, 0 dB line, axis labels and the response
+        // curve), with the bands' dots as XAML on top. The canvas surface is opaque, so it paints
+        // the background and grid itself; XAML siblings underneath a swap-chain panel do not show.
+        // A Canvas reconciles its children positionally, so the dots are appended after the canvas
+        // and keep a stable order while bands are added or removed.
         let mut plot: Vec<View> = Vec::new();
-        for (db, strong) in [
-            (-12.0_f32, false),
-            (-6.0, false),
-            (0.0, true),
-            (6.0, false),
-            (12.0, false),
-        ] {
-            plot.push(plot_line(true, gain_to_y(db), strong).into());
-        }
-        for (hz, strong) in [
-            (50.0_f32, false),
-            (100.0, true),
-            (200.0, false),
-            (500.0, false),
-            (1000.0, true),
-            (2000.0, false),
-            (5000.0, false),
-            (10000.0, true),
-        ] {
-            plot.push(plot_line(false, freq_to_x(hz), strong).into());
-        }
-        for (hz, text) in [(100.0_f32, "100"), (1000.0, "1k"), (10000.0, "10k")] {
-            plot.push(plot_label(text, freq_to_x(hz) + 3.0, EQ_H - 13.0).into());
-        }
-        for (db, text) in [(12.0_f32, "+12"), (0.0, "0"), (-12.0, "-12")] {
-            plot.push(plot_label(text, 3.0, gain_to_y(db) + 1.0).into());
-        }
 
         // The response is drawn with Direct2D rather than a column of `Border`s: a polyline is
         // anti-aliased, where axis-aligned rectangles can only approximate a slope as a staircase.
-        // It sits between the labels and the dots, so the dots stay on top and keep their handlers.
+        // It sits below the dots, so the dots stay on top and keep their handlers.
         {
             let curve = eq.clone();
             let invalidator = self.eq_invalidator.clone();
@@ -990,7 +984,6 @@ impl MixerApp {
         };
         let table = ScrollViewer::new()
             .vertical_scroll_bar_visibility(ScrollBarVisibility::Auto)
-            .max_height(EQ_TABLE_H)
             .content(table_body);
 
         // ---- footer
@@ -1021,21 +1014,27 @@ impl MixerApp {
                     .vertical_alignment(VerticalAlignment::Center),
             ));
 
-        Border::new()
-            .width(EQ_W + 20.0)
-            .padding(Thickness::uniform(8.0))
-            .corner_radius(10.0)
-            .vertical_alignment(VerticalAlignment::Top)
-            .background(Brush::Solid(CARD))
-            .border_brush(Brush::Solid(CARD_EDGE))
-            .border_thickness(Thickness::uniform(1.0))
-            .content(StackPanel::new().spacing(6.0).children((
+        // Fills the modal: header, graph, the band table taking the remaining height, then footer.
+        Grid::new()
+            .rows([
+                GridLength::Auto, // header
+                GridLength::Auto, // graph
+                GridLength::STAR, // band table
+                GridLength::Auto, // footer
+            ])
+            .row_spacing(10.0)
+            .children((
                 header,
-                graph,
-                table_header,
-                table,
-                footer,
-            )))
+                graph
+                    .grid_row(1)
+                    .horizontal_alignment(HorizontalAlignment::Center),
+                Grid::new()
+                    .grid_row(2)
+                    .rows([GridLength::Auto, GridLength::STAR])
+                    .row_spacing(4.0)
+                    .children((table_header, table.grid_row(1))),
+                footer.grid_row(3),
+            ))
             .into()
     }
 
@@ -1247,17 +1246,66 @@ fn color_f(color: Color) -> ColorF {
     ColorF::from_rgba8(color.r, color.g, color.b, color.a)
 }
 
-/// Draws the EQ response with Direct2D: the area between the response and the 0 dB line, plus the
-/// response polyline itself. Direct2D anti-aliases the polyline, so the curve is smooth instead of
-/// the 5 px staircase a column of `Border`s produces. Grid, labels and dots stay XAML on top.
+/// Draws the whole EQ graph with Direct2D: the well, the grid, the 0 dB line, the axis labels,
+/// then the response area and polyline. Direct2D anti-aliases the polyline, so the curve is smooth
+/// instead of the 5 px staircase a column of `Border`s produces. The band dots stay XAML on top.
+///
+/// Everything is drawn here rather than as XAML siblings because the canvas surface is opaque: a
+/// swap-chain panel does not let elements painted beneath it show through.
 fn draw_eq_curve(ctx: &DrawContext<'_>, eq: &EqSettings) -> windows_canvas::Result<()> {
-    // Transparent: the surrounding Border paints the well, so the acrylic backdrop still shows.
-    ctx.clear(ColorF::TRANSPARENT);
+    ctx.clear(EQ_WELL);
+
+    let width = EQ_W as f32;
+    let height = EQ_H as f32;
+    let baseline = height / 2.0;
+
+    // Grid: horizontal gain lines (0 dB strongest), then vertical frequency lines.
+    for (db, strong) in [
+        (-12.0_f32, false),
+        (-6.0, false),
+        (0.0, true),
+        (6.0, false),
+        (12.0, false),
+    ] {
+        let y = (gain_to_y(db) as f32).floor() + 0.5;
+        let color = if strong { GRID_STRONG } else { GRID_WEAK };
+        let brush = ctx.create_solid_brush(color_f(color))?;
+        ctx.draw_line(Vector2::new(0.0, y), Vector2::new(width, y), &brush, 1.0);
+    }
+    for (hz, strong) in [
+        (50.0_f32, false),
+        (100.0, true),
+        (200.0, false),
+        (500.0, false),
+        (1000.0, true),
+        (2000.0, false),
+        (5000.0, false),
+        (10000.0, true),
+    ] {
+        let x = (freq_to_x(hz) as f32).floor() + 0.5;
+        let color = if strong { GRID_STRONG } else { GRID_WEAK };
+        let brush = ctx.create_solid_brush(color_f(color))?;
+        ctx.draw_line(Vector2::new(x, 0.0), Vector2::new(x, height), &brush, 1.0);
+    }
+
+    // Axis labels: frequency along the bottom, gain down the left edge.
+    let label_format = TextFormat::new("Segoe UI", 8.5);
+    let label_brush = ctx.create_solid_brush(color_f(DIM))?;
+    for (hz, text) in [(100.0_f32, "100"), (1000.0, "1k"), (10000.0, "10k")] {
+        let left = freq_to_x(hz) as f32 + 3.0;
+        let rect = Rect::new(left, height - 13.0, left + 44.0, height - 1.0);
+        ctx.draw_text(text, &label_format, &rect, &label_brush);
+    }
+    for (db, text) in [(12.0_f32, "+12"), (0.0, "0"), (-12.0, "-12")] {
+        let top = gain_to_y(db) as f32 + 1.0;
+        let rect = Rect::new(3.0, top, 33.0, top + 12.0);
+        ctx.draw_text(text, &label_format, &rect, &label_brush);
+    }
+
     if eq.bypass || eq.bands.is_empty() {
         return Ok(());
     }
 
-    let baseline = (EQ_H / 2.0) as f32;
     let step = (EQ_W / EQ_COLS as f64) as f32;
     let response: Vec<Vector2> = (0..=EQ_COLS)
         .map(|i| {
@@ -1272,7 +1320,7 @@ fn draw_eq_curve(ctx: &DrawContext<'_>, eq: &EqSettings) -> windows_canvas::Resu
     // Filled area between the response and the 0 dB line (closed along the baseline).
     let area = std::iter::once(Vector2::new(0.0, baseline))
         .chain(response.iter().copied())
-        .chain(std::iter::once(Vector2::new(EQ_W as f32, baseline)));
+        .chain(std::iter::once(Vector2::new(width, baseline)));
     let area = PathBuilder::new(ctx.device())?.polygon(area)?;
     ctx.fill_path(&area, &ctx.create_solid_brush(color_f(CURVE_FILL))?);
 
@@ -1286,35 +1334,6 @@ fn draw_eq_curve(ctx: &DrawContext<'_>, eq: &EqSettings) -> windows_canvas::Resu
     let line = figure.end_open().build()?;
     ctx.draw_path(&line, &ctx.create_solid_brush(color_f(CURVE))?, 2.0);
     Ok(())
-}
-
-/// Grid line on the plot: horizontal (at `pos` = y) or vertical (at `pos` = x).
-fn plot_line(horizontal: bool, pos: f64, strong: bool) -> Border {
-    let color = if strong { GRID_STRONG } else { GRID_WEAK };
-    if horizontal {
-        Border::new()
-            .width(EQ_W)
-            .height(1.0)
-            .background(Brush::Solid(color))
-            .canvas_left(0.0)
-            .canvas_top(pos - 0.5)
-    } else {
-        Border::new()
-            .width(1.0)
-            .height(EQ_H)
-            .background(Brush::Solid(color))
-            .canvas_left(pos - 0.5)
-            .canvas_top(0.0)
-    }
-}
-
-fn plot_label(text: &str, x: f64, y: f64) -> TextBlock {
-    TextBlock::new()
-        .text(text)
-        .font_size(8.5)
-        .foreground(Brush::Solid(DIM))
-        .canvas_left(x)
-        .canvas_top(y)
 }
 
 /// Table layout: on, curve, gain, Q, frequency, remove (about 560 px, same as the plot).

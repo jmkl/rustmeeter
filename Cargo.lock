@@ -670,6 +670,7 @@ dependencies = [
  "rustmeeter-core",
  "windows-canvas",
  "windows-reactor",
+ "windows-text",
 ]
 
 [[package]]
