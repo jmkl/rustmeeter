@@ -8,7 +8,9 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 fn main() -> anyhow::Result<()> {
-    let model = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("cactus").join("needle3.cact");
+    let model = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("cactus")
+        .join("needle3.cact");
     if !model.exists() {
         anyhow::bail!("model not found at {}", model.display());
     }
@@ -54,7 +56,11 @@ fn main() -> anyhow::Result<()> {
     ]"#;
 
     let mut agent = Agent::load(&model)?;
-    agent.init(Some("date: 2026-07-21 Tue 14:30; locale: en-US"), Some(tools), None)?;
+    agent.init(
+        Some("date: 2026-07-21 Tue 14:30; locale: en-US"),
+        Some(tools),
+        None,
+    )?;
 
     let requests = [
         "add tags rust, audio, ai to project Atlas",
@@ -78,4 +84,3 @@ fn main() -> anyhow::Result<()> {
     }
     Ok(())
 }
-

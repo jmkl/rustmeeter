@@ -338,7 +338,7 @@ impl MixerApp {
             .column_spacing(6.0)
             .children((
                 action_button(
-                    "+ Add band",
+                    "\u{e710}",
                     BLUE,
                     INK,
                     context.callback(move |()| Message::EqAdd(id)),

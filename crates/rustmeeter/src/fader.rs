@@ -11,7 +11,7 @@ use windows_reactor::*;
 use crate::theme::{CAP, CAP_EDGE, CYAN, DIM, GROOVE, vmeter};
 
 /// Height shared by the groove, the scale and the meter.
-pub(crate) const FADER_H: f64 = 150.0;
+// pub(crate) const fader_h: f64 = 150.0;
 
 const CAP_W: f64 = 35.0;
 const CAP_H: f64 = 16.0;
@@ -27,6 +27,7 @@ const TICKS: [f32; 8] = [MAX_DB, 6.0, 0.0, -6.0, -12.0, -24.0, -40.0, MIN_DB];
 
 /// Gain fader plus level meter, matching the strip card's height.
 pub(crate) fn fader(
+    fader_h: f64,
     value_db: f32,
     level_db: f32,
     on_change: impl Fn(f32) + Clone + 'static,
@@ -34,9 +35,9 @@ pub(crate) fn fader(
     let press = on_change.clone();
     let drag = on_change;
 
-    let usable = FADER_H - CAP_H;
+    let usable = fader_h - CAP_H;
     let cap_y = CAP_H / 2.0 + t_at(value_db) * usable;
-    let fill_h = (FADER_H - cap_y).max(0.0);
+    let fill_h = (fader_h - cap_y).max(0.0);
 
     let labels: Vec<View> = TICKS
         .iter()
@@ -62,12 +63,12 @@ pub(crate) fn fader(
 
     let scale = Canvas::new()
         .width(LABEL_W)
-        .height(FADER_H)
+        .height(fader_h)
         .children(labels);
 
     let groove = Border::new()
         .width(TRACK_W)
-        .height(FADER_H)
+        .height(fader_h)
         .corner_radius(TRACK_W / 2.0)
         .background(Brush::Solid(GROOVE))
         .canvas_left((WELL_W - TRACK_W) / 2.0)
@@ -79,7 +80,7 @@ pub(crate) fn fader(
         .corner_radius(TRACK_W / 2.0)
         .background(Brush::Solid(CYAN))
         .canvas_left((WELL_W - TRACK_W) / 2.0)
-        .canvas_top(FADER_H - fill_h);
+        .canvas_top(fader_h - fill_h);
 
     let cap = Border::new()
         .width(CAP_W)
@@ -100,24 +101,24 @@ pub(crate) fn fader(
 
     let well = Border::new()
         .width(WELL_W)
-        .height(FADER_H)
+        .height(fader_h)
         // Transparent rather than absent: the gaps between the children must still hit-test.
         .background(Brush::Solid(Color::argb(0x00, 0x00, 0x00, 0x00)))
         .capture_pointer_on_press(true)
         .on_pointer_pressed(move |p: PointerEventInfo| {
             if p.is_left_button_pressed {
-                press(snap(db_at(y_to_t(p.y))));
+                press(snap(db_at(y_to_t(p.y, fader_h))));
             }
         })
         .on_pointer_moved(move |p: PointerEventInfo| {
             if p.is_left_button_pressed {
-                drag(snap(db_at(y_to_t(p.y))));
+                drag(snap(db_at(y_to_t(p.y, fader_h))));
             }
         })
         .content(
             Canvas::new()
                 .width(WELL_W)
-                .height(FADER_H)
+                .height(fader_h)
                 .children((groove, fill, cap)),
         );
 
@@ -132,14 +133,14 @@ pub(crate) fn fader(
         .children((
             scale,
             well.grid_column(1),
-            vmeter(level_db, METER_W, FADER_H).grid_column(2),
+            vmeter(level_db, METER_W, fader_h).grid_column(2),
         ))
         .into()
 }
 
 /// Pointer y (relative to the well) to travel, 0 at the top tick and 1 at the bottom tick.
-fn y_to_t(y: f64) -> f64 {
-    ((y - CAP_H / 2.0) / (FADER_H - CAP_H)).clamp(0.0, 1.0)
+fn y_to_t(y: f64, fh: f64) -> f64 {
+    ((y - CAP_H / 2.0) / (fh - CAP_H)).clamp(0.0, 1.0)
 }
 
 /// Travel to dB: piecewise linear between the printed ticks.

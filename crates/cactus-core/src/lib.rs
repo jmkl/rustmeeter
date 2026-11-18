@@ -120,9 +120,7 @@ fn last_error() -> String {
 /// `None` becomes a null pointer; a NUL byte inside the string is rejected rather than truncated.
 fn opt_cstring(value: Option<&str>) -> Result<Option<CString>> {
     value
-        .map(|v| {
-            CString::new(v).with_context(|| format!("cactus: NUL byte in {v:?}"))
-        })
+        .map(|v| CString::new(v).with_context(|| format!("cactus: NUL byte in {v:?}")))
         .transpose()
 }
 
@@ -207,9 +205,7 @@ impl Cactus {
         if have.contains(needed) {
             Ok(())
         } else {
-            bail!(
-                "cactus: the loaded model(s) do not provide {needed:?} (loaded: {have:?})"
-            );
+            bail!("cactus: the loaded model(s) do not provide {needed:?} (loaded: {have:?})");
         }
     }
 
@@ -238,9 +234,7 @@ impl Cactus {
         let system = opt_cstring(system_prompt)?;
         let tools = opt_cstring(tools_json)?;
         let index = opt_cstring(tool_index_path)?;
-        let rc = unsafe {
-            cactus_init(ptr(&system), ptr(&tools), ptr(&index))
-        };
+        let rc = unsafe { cactus_init(ptr(&system), ptr(&tools), ptr(&index)) };
         if rc < 0 {
             bail!("cactus_init failed: {}", last_error());
         }
@@ -305,21 +299,10 @@ impl Cactus {
 
     /// Language / keyword bias / word timestamps for transcriptions the engine runs for itself
     /// (for example inside [`Cactus::complete`] when it is handed audio).
-    pub fn set_audio(
-        &self,
-        language: Option<&str>,
-        keywords: Option<&str>,
-        word_timestamps: bool,
-    ) {
+    pub fn set_audio(&self, language: Option<&str>, keywords: Option<&str>, word_timestamps: bool) {
         let language = opt_cstring(language).ok().flatten();
         let keywords = opt_cstring(keywords).ok().flatten();
-        unsafe {
-            cactus_set_audio(
-                ptr(&language),
-                ptr(&keywords),
-                word_timestamps as c_int,
-            )
-        }
+        unsafe { cactus_set_audio(ptr(&language), ptr(&keywords), word_timestamps as c_int) }
     }
 
     /// One-pass transcription of a 16 kHz mono clip. Returns the raw JSON (`text`, `words`, ...).
@@ -465,21 +448,12 @@ impl Whistle {
     }
 
     /// Language / keywords / word timestamps for the engine's own transcriptions.
-    pub fn set_audio(
-        &self,
-        language: Option<&str>,
-        keywords: Option<&str>,
-        word_timestamps: bool,
-    ) {
+    pub fn set_audio(&self, language: Option<&str>, keywords: Option<&str>, word_timestamps: bool) {
         self.engine.set_audio(language, keywords, word_timestamps)
     }
 
     /// Live transcription: feed ~1 s chunks, end with [`Whistle::stream_stop`].
-    pub fn stream_process(
-        &mut self,
-        pcm16k: &[i16],
-        keywords: Option<&str>,
-    ) -> Result<String> {
+    pub fn stream_process(&mut self, pcm16k: &[i16], keywords: Option<&str>) -> Result<String> {
         let pcm = to_f32(pcm16k);
         let language = self.language.as_deref();
         self.engine.stream_process(&pcm, language, keywords)

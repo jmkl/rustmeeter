@@ -95,12 +95,11 @@ pub(crate) fn action_button(
         .style(ButtonStyle::Subtle)
         .background(Brush::Solid(bg))
         .height(30.0)
-        .min_width(84.0)
+        .min_width(30.0)
         .content(
-            TextBlock::new()
-                .text(text)
+            FontIcon::new()
+                .glyph(text)
                 .font_size(11.5)
-                .font_weight(FontWeight::SEMI_BOLD)
                 .foreground(Brush::Solid(fg)),
         )
         .on_click(click)

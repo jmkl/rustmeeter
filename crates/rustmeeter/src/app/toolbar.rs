@@ -1,4 +1,4 @@
-//! Toolbar: transport, caption controls, bus device pickers and the "add input" combo.
+//! Toolbar: bus device pickers and the "add input" combo.
 
 use rustmeeter_core::*;
 use windows_reactor::*;
@@ -9,81 +9,6 @@ use crate::theme::*;
 
 impl MixerApp {
     pub(crate) fn toolbar(&self, view: &MixerView, context: &ViewContext<Self>) -> View {
-        let transport = StackPanel::new()
-            .orientation(Orientation::Horizontal)
-            .spacing(6.0)
-            .children((
-                if view.running {
-                    action_button(
-                        "Stop",
-                        RED_STRONG,
-                        WHITE,
-                        context.callback(|()| Message::ToggleRun),
-                    )
-                } else {
-                    action_button(
-                        "Start",
-                        GREEN,
-                        INK,
-                        context.callback(|()| Message::ToggleRun),
-                    )
-                },
-                Button::new()
-                    .style(ButtonStyle::Subtle)
-                    .height(30.0)
-                    .content(label_text("Refresh", 11.0, DIM))
-                    .on_click(context.callback(|()| Message::Refresh)),
-            ));
-
-        let mut captions: Vec<View> = vec![section_label("CAPTIONS").into()];
-        match self.caps.active_strip() {
-            Some(n) => captions.push(
-                action_button(
-                    &format!("Stop · strip {n}"),
-                    RED,
-                    INK,
-                    context.callback(|()| Message::CaptionsOff),
-                )
-                .into(),
-            ),
-            None => {
-                let mut items: Vec<String> = vec!["first mic".to_string()];
-                for i in 1..=view.strips.len() {
-                    items.push(format!("strip {i}"));
-                }
-                captions.push(
-                    ComboBox::new()
-                        .width(104.0)
-                        .items_source(items)
-                        .selected_index(Some(self.caption_strip.unwrap_or(0)))
-                        .on_selection_changed(
-                            context.callback(|index: Option<usize>| Message::CaptionStrip(index)),
-                        )
-                        .into(),
-                );
-                captions.push(
-                    action_button(
-                        "Start captions",
-                        BLUE,
-                        INK,
-                        context.callback(|()| Message::CaptionsOn),
-                    )
-                    .into(),
-                );
-            }
-        }
-
-        let top = Grid::new()
-            .columns([GridLength::STAR, GridLength::Auto])
-            .children((
-                transport,
-                StackPanel::new()
-                    .grid_column(1)
-                    .orientation(Orientation::Horizontal)
-                    .spacing(6.0)
-                    .children(captions),
-            ));
-
         let devices = Grid::new()
             .columns([
                 GridLength::Auto,
@@ -112,10 +37,7 @@ impl MixerApp {
                     .vertical_alignment(VerticalAlignment::Center),
             ));
 
-        card(StackPanel::new().spacing(6.0).children((top, devices)))
-            .grid_row(0)
-            .grid_column_span(2)
-            .into()
+        card(devices).grid_row(0).grid_column_span(2).into()
     }
 
     fn bus_combo(&self, bus: usize, view: &MixerView, context: &ViewContext<Self>) -> ComboBox {

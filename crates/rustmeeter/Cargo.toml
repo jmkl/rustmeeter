@@ -13,3 +13,7 @@ windows-text = { path = "../../../windows-rs/crates/libs/text" }
 [features]
 default = ["cactus"]
 cactus = ["rustmeeter-core/cactus"]
+
+
+[build-dependencies]
+winres = "0.1"

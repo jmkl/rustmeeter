@@ -51,8 +51,7 @@ impl MixerApp {
 
         Grid::new()
             .grid_row(2)
-            .grid_column_span(2)
-            .rows([GridLength::Auto, GridLength::Auto])
+            .rows([GridLength::Auto, GridLength::STAR])
             .row_spacing(6.0)
             .children((
                 header,
@@ -112,9 +111,12 @@ impl MixerApp {
         );
 
         let gain = params.clone();
-        body.push(fader(params.gain_db(), params.level_db(), move |db| {
-            gain.set_gain_db(db)
-        }));
+        body.push(fader(
+            150.,
+            params.gain_db(),
+            params.level_db(),
+            move |db| gain.set_gain_db(db),
+        ));
 
         let gain_db = zeroed(params.gain_db());
         body.push(

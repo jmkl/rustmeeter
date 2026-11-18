@@ -22,12 +22,12 @@
 //! - [`util`]       small display/domain helpers
 
 mod app;
+mod config;
 mod fader;
 mod hslider;
 mod messages;
 mod theme;
 mod util;
-
 use windows_reactor::{App, WindowPolicy};
 
 fn main() {
@@ -35,7 +35,7 @@ fn main() {
         (),
         WindowPolicy::new()
             .title("RustMeeter")
-            .client_size(940.0, 740.0)
+            .client_size(400.0, 580.0)
             .minimum_client_size(760.0, 460.0),
     )
     .unwrap();

@@ -273,11 +273,18 @@ fn captions_off(caps: &mut CaptionController) {
 
 fn captions_status(caps: &CaptionController) {
     match caps.active_strip() {
-        Some(n) => println!("Captions: ON for strip {n} -> {}", caps.log_path().display()),
+        Some(n) => println!(
+            "Captions: ON for strip {n} -> {}",
+            caps.log_path().display()
+        ),
         None => println!(
             "Captions: OFF (model {}, {})",
             caps.model_path().display(),
-            if caps.model_loaded() { "loaded" } else { "not loaded yet" }
+            if caps.model_loaded() {
+                "loaded"
+            } else {
+                "not loaded yet"
+            }
         ),
     }
 }

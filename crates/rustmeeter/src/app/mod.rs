@@ -20,6 +20,7 @@ use windows_canvas::Invalidator;
 use windows_reactor::*;
 
 use self::eq::{EqDrag, MODAL_PAD};
+use crate::config::Conf;
 use crate::messages::Message;
 use crate::theme::*;
 
@@ -44,6 +45,8 @@ pub(crate) struct MixerApp {
     eq_invalidator: Invalidator,
     /// Window client width in DIPs; sizes the EQ band table (see `eq_table_width`).
     window_w: f64,
+    config: Conf,
+    latest_caption: Caption,
 }
 
 impl MixerApp {
@@ -70,6 +73,81 @@ impl MixerApp {
             Some(device) => self.outputs.iter().position(|o| o == device).map(|i| i + 1),
         }
     }
+
+    fn transport(&self, view: &MixerView, context: &ViewContext<Self>) -> StackPanel {
+        StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(6.0)
+            .children((
+                if view.running {
+                    action_button(
+                        "\u{e769}",
+                        RED_STRONG,
+                        WHITE,
+                        context.callback(|()| Message::ToggleRun),
+                    )
+                } else {
+                    action_button(
+                        "\u{e768}",
+                        GREEN,
+                        INK,
+                        context.callback(|()| Message::ToggleRun),
+                    )
+                },
+                action_button(
+                    "\u{e72c}",
+                    DIM,
+                    INK,
+                    context.callback(|()| Message::Refresh),
+                ),
+            ))
+    }
+
+    fn captions(&self, view: &MixerView, context: &ViewContext<Self>) -> StackPanel {
+        let mut captions: Vec<View> = vec![];
+        match self.caps.active_strip() {
+            Some(_) => captions.push(
+                action_button(
+                    "\u{ead8}",
+                    RED,
+                    INK,
+                    context.callback(|()| Message::CaptionsOff),
+                )
+                .tooltip("Caption")
+                .into(),
+            ),
+            None => {
+                let mut items: Vec<String> = vec!["first mic".to_string()];
+                for i in 1..=view.strips.len() {
+                    items.push(format!("strip {i}"));
+                }
+                captions.push(
+                    ComboBox::new()
+                        .width(104.0)
+                        .items_source(items)
+                        .selected_index(Some(self.caption_strip.unwrap_or(0)))
+                        .on_selection_changed(
+                            context.callback(|index: Option<usize>| Message::CaptionStrip(index)),
+                        )
+                        .into(),
+                );
+                captions.push(
+                    action_button(
+                        "\u{ead8}",
+                        BLUE,
+                        INK,
+                        context.callback(|()| Message::CaptionsOn),
+                    )
+                    .tooltip("Caption")
+                    .into(),
+                );
+            }
+        }
+        StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(6.0)
+            .children(captions)
+    }
 }
 
 impl Component for MixerApp {
@@ -88,12 +166,16 @@ impl Component for MixerApp {
             }));
         }
 
+        let config = Conf::load().expect("Failed to load config");
+        let whistle_cact = config.config.model_root.join("whistle.cact");
+
         let caps = {
             // Caption thread: same hand-off as above.
             let completion = context.completion();
+
             CaptionController::new(
-                PathBuf::from("cactus/whistle.cact"),
-                PathBuf::from("captions.log"),
+                PathBuf::from(whistle_cact),
+                PathBuf::from(&config.log),
                 None,
                 None,
                 Arc::new(move |c: &Caption| {
@@ -131,6 +213,11 @@ impl Component for MixerApp {
             eq_drag: None,
             eq_invalidator: Invalidator::new(),
             window_w: 940.0,
+            config: config,
+            latest_caption: Caption {
+                text: "What the Fcuk!".into(),
+                ..Default::default()
+            },
         };
         app.start();
         app
@@ -153,6 +240,7 @@ impl Component for MixerApp {
                 while self.transcript.len() > MAX_LINES {
                     self.transcript.pop_front();
                 }
+                self.latest_caption = c;
             }
             Message::ToggleRun => {
                 if self.mixer.is_running() {
@@ -253,9 +341,10 @@ impl Component for MixerApp {
             .on_window_size(context.callback(|size: WindowSize| Message::WindowWidth(size.width)));
         context.window_visuals(
             WindowVisuals::new()
+                .icon(self.config.icon.clone())
                 .theme(WindowTheme::Dark)
                 .backdrop(WindowBackdrop::Acrylic)
-                .client_size(940.0, 740.0)
+                .client_size(800.0, 580.0)
                 .constraints(WindowConstraints {
                     min_width: Some(760.0),
                     min_height: Some(460.0),
@@ -327,9 +416,23 @@ impl Component for MixerApp {
             .rows([GridLength::Auto, GridLength::STAR])
             .children((
                 TitleBar::new()
-                    .title("RustMeeter")
-                    .subtitle("mixer · live captions")
-                    .right_header(run_state(view.running)),
+                    .margin(Thickness::new(20., 0., 0., 0.))
+                    .left_header(
+                        StackPanel::new()
+                            .orientation(Orientation::Horizontal)
+                            .spacing(12.0)
+                            .children((
+                                TextBlock::new()
+                                    .text("RustMeeter")
+                                    .font_weight(FontWeight::BOLD)
+                                    .font_size(20.)
+                                    .vertical_alignment(VerticalAlignment::Center)
+                                    .padding(Thickness::new(0., 0., 5.0, 0.)),
+                                self.transport(&view, context),
+                                self.captions(&view, context),
+                                run_state(view.running),
+                            )),
+                    ),
                 Border::new().grid_row(1).content(stage),
             ))
             .into()

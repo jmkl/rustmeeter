@@ -78,22 +78,30 @@ fn open_browser(url: &str) -> String {
 fn switch_light(command: &str) -> String {
     match command {
         "day" => {
-            if dry_run() { return "[dry-run] would switch the light to day".to_string(); }
+            if dry_run() {
+                return "[dry-run] would switch the light to day".to_string();
+            }
             println!("switch to day");
             "light switched to day".to_string()
         }
         "night" => {
-            if dry_run() { return "[dry-run] would switch the light to night".to_string(); }
+            if dry_run() {
+                return "[dry-run] would switch the light to night".to_string();
+            }
             println!("switch to night");
             "light switched to night".to_string()
         }
         "on" => {
-            if dry_run() { return "[dry-run] would turn on the light".to_string(); }
+            if dry_run() {
+                return "[dry-run] would turn on the light".to_string();
+            }
             println!("switch to on");
             "light turned on".to_string()
         }
         "off" => {
-            if dry_run() { return "[dry-run] would turn off the light".to_string(); }
+            if dry_run() {
+                return "[dry-run] would turn off the light".to_string();
+            }
             println!("switch to off");
             "light turned off".to_string()
         }
@@ -116,13 +124,19 @@ fn execute(name: &str, args: &Value) -> String {
 }
 
 fn main() -> anyhow::Result<()> {
-    let model = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("cactus").join("needle3.cact");
+    let model = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("cactus")
+        .join("needle3.cact");
     if !model.exists() {
         anyhow::bail!("model not found at {}", model.display());
     }
 
     let mut agent = Agent::load(&model)?;
-    agent.init(Some("date: 2026-07-21 Tue 14:30; locale: en-US"), Some(TOOLS), None)?;
+    agent.init(
+        Some("date: 2026-07-21 Tue 14:30; locale: en-US"),
+        Some(TOOLS),
+        None,
+    )?;
 
     let requests = [
         "turn on the light",
@@ -137,7 +151,10 @@ fn main() -> anyhow::Result<()> {
         let raw = agent.complete(Some(req), None, 64)?;
         let v: Value = serde_json::from_str(&raw)?;
         let mut calls = v["function_calls"].as_array().cloned().unwrap_or_default();
-        let suppressed = v["suppressed_calls"].as_array().cloned().unwrap_or_default();
+        let suppressed = v["suppressed_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         if calls.is_empty() && !suppressed.is_empty() {
             println!("  (suppressed, low confidence - executing anyway in demo)");
             calls = suppressed;
@@ -162,4 +179,3 @@ fn main() -> anyhow::Result<()> {
     println!("\ndone");
     Ok(())
 }
-

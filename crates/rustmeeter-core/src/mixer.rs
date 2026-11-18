@@ -11,8 +11,8 @@
 
 use crate::devices::InputSource;
 use crate::engine::{BusSpec, Engine, StripSpec};
-use crate::events::{Event, EventHandler, default_handler};
 use crate::eq::EqSettings;
+use crate::events::{Event, EventHandler, default_handler};
 use crate::params::{NUM_BUSES, Params};
 use crate::tap::{Tap, TapShared};
 use anyhow::Result;

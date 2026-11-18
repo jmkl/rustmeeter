@@ -62,7 +62,11 @@ impl Params {
 
     /// Current parametric EQ (cheap: clones an `Arc`).
     pub fn eq(&self) -> Arc<EqSettings> {
-        self.eq_state.lock().unwrap_or_else(|e| e.into_inner()).1.clone()
+        self.eq_state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .1
+            .clone()
     }
 
     /// Replace the whole EQ. Settings are clamped (`EqSettings::sanitize`) and take effect on the

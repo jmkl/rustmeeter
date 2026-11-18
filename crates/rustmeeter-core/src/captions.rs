@@ -25,7 +25,7 @@ pub fn share_transcriber(t: impl Transcriber + 'static) -> SharedTranscriber {
     Arc::new(Mutex::new(Box::new(t)))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Caption {
     pub time: DateTime<Local>,
     pub label: String,

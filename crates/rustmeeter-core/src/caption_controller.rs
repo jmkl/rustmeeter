@@ -47,8 +47,8 @@ impl CaptionController {
 
     #[cfg(feature = "cactus")]
     fn load_asr(&mut self) -> Result<SharedTranscriber> {
-        use crate::captions::share_transcriber;
         use crate::cactus::Whistle;
+        use crate::captions::share_transcriber;
         if let Some(a) = &self.asr {
             return Ok(a.clone());
         }

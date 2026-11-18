@@ -5,22 +5,14 @@ use windows_reactor::*;
 
 use super::MixerApp;
 use super::strips::mute_chip;
-use crate::hslider::hslider;
+use crate::fader::fader;
 use crate::theme::*;
 use crate::util::*;
-
-/// The side column is a fixed 300 px; this leaves a small margin inside the card.
-const BUS_SLIDER_W: f64 = 250.0;
-/// Level meter at the right of each bus row, spanning its header and slider rows.
-const BUS_METER_W: f64 = 14.0;
-const BUS_METER_H: f64 = 56.0;
-const BUS_HEAD_ROW: f64 = 24.0;
-const BUS_SLIDER_ROW: f64 = 32.0;
 
 impl MixerApp {
     pub(crate) fn side(&self, view: &MixerView) -> View {
         Grid::new()
-            .grid_row(3)
+            .grid_row(2)
             .grid_column(1)
             .rows([GridLength::Auto, GridLength::STAR])
             .row_spacing(6.0)
@@ -28,39 +20,29 @@ impl MixerApp {
                 section_label("BUSES"),
                 card(
                     Grid::new()
-                        .rows([GridLength::Auto, GridLength::Auto])
-                        .row_spacing(8.0)
-                        .children((self.bus_row(0, view), self.bus_row(1, view).grid_row(1))),
+                        .rows([GridLength::STAR])
+                        .columns([GridLength::Auto, GridLength::Auto])
+                        .column_spacing(6.0)
+                        .children((self.bus_card(0, view), self.bus_card(1, view))),
                 )
                 .grid_row(1),
             ))
             .into()
     }
 
-    fn bus_row(&self, bus: usize, view: &MixerView) -> Grid {
-        let p = &view.buses[bus].params;
-        let gain = p.clone();
-        let muted = p.muted();
+    fn bus_card(&self, bus: usize, view: &MixerView) -> View {
+        let param = &view.buses[bus].params;
+        let gain = param.clone();
+        let muted = param.muted();
         let has_device = view.buses[bus].device.is_some();
         let device = view.buses[bus]
             .device
             .clone()
             .unwrap_or_else(|| "no device".to_string());
 
-        Grid::new()
-            .rows([
-                GridLength::Pixel(BUS_HEAD_ROW),
-                GridLength::Pixel(BUS_SLIDER_ROW),
-            ])
-            .columns([
-                GridLength::Auto,
-                GridLength::STAR,
-                GridLength::Auto,
-                GridLength::Auto,
-                GridLength::Pixel(BUS_METER_W),
-            ])
+        let header = Grid::new()
+            .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
             .column_spacing(6.0)
-            .row_spacing(3.0)
             .children((
                 badge(bus_name(bus), if bus == 0 { GREEN } else { BLUE }),
                 TextBlock::new()
@@ -74,32 +56,52 @@ impl MixerApp {
                     }))
                     .text_trimming(TextTrimming::CharacterEllipsis)
                     .vertical_alignment(VerticalAlignment::Center),
-                mute_chip(p).grid_column(2).height(20.0),
-                TextBlock::new()
-                    .grid_column(3)
-                    .text(trim_db(p.gain_db()))
-                    .font_size(10.0)
-                    .foreground(Brush::Solid(if muted { RED } else { DIM }))
-                    .text_alignment(TextAlignment::Right)
-                    .width(32.0)
-                    .vertical_alignment(VerticalAlignment::Center),
-                hslider(
-                    BUS_SLIDER_W,
-                    f64::from(p.gain_db()),
-                    f64::from(MIN_DB),
-                    f64::from(MAX_DB),
-                    0.5,
-                    true,
-                    move |v| gain.set_gain_db(v as f32),
-                )
-                .grid_row(1)
-                .grid_column_span(4)
-                .vertical_alignment(VerticalAlignment::Center),
-                vmeter(p.level_db(), BUS_METER_W, BUS_METER_H)
-                    .grid_column(4)
-                    .grid_row_span(2)
-                    .vertical_alignment(VerticalAlignment::Center),
-            ))
+                mute_chip(param).grid_column(2).height(20.0),
+            ));
+
+        let vfader = fader(200., param.gain_db(), param.level_db(), move |db| {
+            gain.set_gain_db(db)
+        });
+
+        let gain_db = zeroed(param.gain_db());
+
+        let gain_txt: View = TextBlock::new()
+            .text(if gain_db == 0.0 {
+                "0.0 dB".to_string()
+            } else {
+                format!("{gain_db:+.1} dB")
+            })
+            .font_size(10.0)
+            .foreground(Brush::Solid(DIM))
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .into();
+
+        Border::new()
+            .width(138.0)
+            .padding(Thickness::uniform(8.0))
+            .corner_radius(10.0)
+            .vertical_alignment(VerticalAlignment::Stretch)
+            .background(Brush::Solid(CARD))
+            .border_brush(Brush::Solid(if muted {
+                Color::argb(0x7F, RED.r, RED.g, RED.b)
+            } else {
+                CARD_EDGE
+            }))
+            .border_thickness(Thickness::uniform(1.0))
+            .content(
+                Grid::new()
+                    .rows([GridLength::STAR, GridLength::Auto, GridLength::Auto])
+                    .columns([GridLength::STAR])
+                    .children((
+                        Border::new()
+                            .grid_row(0)
+                            .content(header)
+                            .vertical_alignment(VerticalAlignment::Top),
+                        Border::new().grid_row(1).content(vfader),
+                        Border::new().grid_row(2).content(gain_txt),
+                    )),
+            )
+            .grid_column(bus as i32)
             .into()
     }
 }

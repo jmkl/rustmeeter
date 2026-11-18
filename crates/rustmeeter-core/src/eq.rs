@@ -147,7 +147,8 @@ impl EqBand {
         let (a1, a2) = (f64::from(c.a1), f64::from(c.a2));
         let w = 2.0 * std::f64::consts::PI * f64::from(freq_hz) / f64::from(fs);
         let (cw, c2w) = (w.cos(), (2.0 * w).cos());
-        let num = b0 * b0 + b1 * b1 + b2 * b2 + 2.0 * (b0 * b1 + b1 * b2) * cw + 2.0 * b0 * b2 * c2w;
+        let num =
+            b0 * b0 + b1 * b1 + b2 * b2 + 2.0 * (b0 * b1 + b1 * b2) * cw + 2.0 * b0 * b2 * c2w;
         let den = 1.0 + a1 * a1 + a2 * a2 + 2.0 * (a1 + a1 * a2) * cw + 2.0 * a2 * c2w;
         (10.0 * (num / den).max(1e-12).log10()) as f32
     }

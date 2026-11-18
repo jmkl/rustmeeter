@@ -34,6 +34,7 @@ impl MixerApp {
 
         Grid::new()
             .grid_row(3)
+            .grid_column_span(2)
             .rows([GridLength::Auto, GridLength::STAR])
             .row_spacing(6.0)
             .children((
@@ -48,9 +49,13 @@ impl MixerApp {
                             .foreground(Brush::Solid(DIM)),
                     )),
                 card(
-                    ScrollViewer::new()
-                        .vertical_scroll_bar_visibility(ScrollBarVisibility::Auto)
-                        .content(content),
+                    TextBlock::new()
+                        .grid_column(1)
+                        .text(self.latest_caption.text.clone())
+                        .font_size(20.0)
+                        .font_weight(FontWeight::BOLD)
+                        .text_alignment(TextAlignment::Center)
+                        .foreground(Brush::Solid(DIM)),
                 )
                 .grid_row(1),
             ))

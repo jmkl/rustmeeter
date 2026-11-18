@@ -352,10 +352,42 @@ impl Engine {
             let sc: StreamConfig = cfg.config();
             let p = s.params.clone();
             let stream = match cfg.sample_format() {
-                SampleFormat::F32 => build_input::<f32>(&dev, &sc, prods, p, tap.clone(), s.source.label(), handler.clone())?,
-                SampleFormat::I16 => build_input::<i16>(&dev, &sc, prods, p, tap.clone(), s.source.label(), handler.clone())?,
-                SampleFormat::U16 => build_input::<u16>(&dev, &sc, prods, p, tap.clone(), s.source.label(), handler.clone())?,
-                SampleFormat::I32 => build_input::<i32>(&dev, &sc, prods, p, tap.clone(), s.source.label(), handler.clone())?,
+                SampleFormat::F32 => build_input::<f32>(
+                    &dev,
+                    &sc,
+                    prods,
+                    p,
+                    tap.clone(),
+                    s.source.label(),
+                    handler.clone(),
+                )?,
+                SampleFormat::I16 => build_input::<i16>(
+                    &dev,
+                    &sc,
+                    prods,
+                    p,
+                    tap.clone(),
+                    s.source.label(),
+                    handler.clone(),
+                )?,
+                SampleFormat::U16 => build_input::<u16>(
+                    &dev,
+                    &sc,
+                    prods,
+                    p,
+                    tap.clone(),
+                    s.source.label(),
+                    handler.clone(),
+                )?,
+                SampleFormat::I32 => build_input::<i32>(
+                    &dev,
+                    &sc,
+                    prods,
+                    p,
+                    tap.clone(),
+                    s.source.label(),
+                    handler.clone(),
+                )?,
                 f => bail!("unsupported input sample format {f:?}"),
             };
             stream.play()?;
@@ -372,10 +404,18 @@ impl Engine {
                 };
                 let sc: StreamConfig = cfg.config();
                 let stream = match cfg.sample_format() {
-                    SampleFormat::F32 => build_output::<f32>(&dev, &sc, mixer, bus_label, handler.clone())?,
-                    SampleFormat::I16 => build_output::<i16>(&dev, &sc, mixer, bus_label, handler.clone())?,
-                    SampleFormat::U16 => build_output::<u16>(&dev, &sc, mixer, bus_label, handler.clone())?,
-                    SampleFormat::I32 => build_output::<i32>(&dev, &sc, mixer, bus_label, handler.clone())?,
+                    SampleFormat::F32 => {
+                        build_output::<f32>(&dev, &sc, mixer, bus_label, handler.clone())?
+                    }
+                    SampleFormat::I16 => {
+                        build_output::<i16>(&dev, &sc, mixer, bus_label, handler.clone())?
+                    }
+                    SampleFormat::U16 => {
+                        build_output::<u16>(&dev, &sc, mixer, bus_label, handler.clone())?
+                    }
+                    SampleFormat::I32 => {
+                        build_output::<i32>(&dev, &sc, mixer, bus_label, handler.clone())?
+                    }
                     f => bail!("unsupported output sample format {f:?}"),
                 };
                 stream.play()?;
