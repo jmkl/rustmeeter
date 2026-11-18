@@ -18,13 +18,13 @@ impl MixerApp {
         for (index, strip) in view.strips.iter().enumerate() {
             cards.push(keyed(
                 u64::from(strip.id),
-                self.strip_card(index, strip, context),
+                self.strip_card(index, strip, view, context),
             ));
         }
         let content: View = if cards.is_empty() {
             card(
                 TextBlock::new()
-                    .text("No strips yet — pick a device under ADD.")
+                    .text("No strips yet — add a source above. A strip is one device you capture.")
                     .font_size(10.5)
                     .foreground(Brush::Solid(DIM)),
             )
@@ -37,15 +37,17 @@ impl MixerApp {
                 .into()
         };
         let header = Grid::new()
-            .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+            .columns([GridLength::Auto, GridLength::STAR])
             .column_spacing(8.0)
             .children((
                 section_label(&format!("STRIPS  ·  {}", view.strips.len())),
                 TextBlock::new()
-                    .grid_column(2)
-                    .text("mic → B · loopback → A · captions read the raw strip")
+                    .grid_column(1)
+                    .text("each strip is one source · route it to A or B")
                     .font_size(9.0)
                     .foreground(Brush::Solid(DIM))
+                    .text_alignment(TextAlignment::Right)
+                    .text_trimming(TextTrimming::CharacterEllipsis)
                     .vertical_alignment(VerticalAlignment::Center),
             ));
 
@@ -66,9 +68,16 @@ impl MixerApp {
             .into()
     }
 
-    fn strip_card(&self, index: usize, s: &StripView, context: &ViewContext<Self>) -> View {
+    fn strip_card(
+        &self,
+        index: usize,
+        s: &StripView,
+        view: &MixerView,
+        context: &ViewContext<Self>,
+    ) -> View {
         let id = s.id;
         let params = &s.params;
+        let eq = &s.eq;
 
         let header = Grid::new()
             .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
@@ -81,9 +90,12 @@ impl MixerApp {
                     .font_size(10.5)
                     .font_weight(FontWeight::SEMI_BOLD)
                     .text_trimming(TextTrimming::CharacterEllipsis)
-                    .vertical_alignment(VerticalAlignment::Center),
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .tooltip(&s.label),
                 x_button(context.callback(move |()| Message::RemoveStrip(id))).grid_column(2),
             ));
+
+        let (what, why) = source_caption(s);
 
         let routes = Grid::new()
             .columns([
@@ -94,20 +106,52 @@ impl MixerApp {
             ])
             .column_spacing(4.0)
             .children((
-                route_chip(params, 0),
-                route_chip(params, 1).grid_column(1),
+                route_chip(params, 0, view, s),
+                in_column(route_chip(params, 1, view, s), 1),
                 mute_chip(params).grid_column(3),
             ));
 
-        let mut body: Vec<View> = vec![header.into(), routes.into()];
+        let mut body: Vec<View> = vec![
+            header.into(),
+            caption(what, why).tooltip(caption_hint(s)),
+            routes.into(),
+        ];
 
+        let live = params.clone();
+        let bypass = eq.bypass.clone();
+        let invalidator = self.eq_invalidator.clone();
         body.push(
-            eq_button(
-                &s.eq,
-                self.eq_open == Some(id),
-                context.callback(move |()| Message::ToggleEq(id)),
-            )
-            .into(),
+            Grid::new()
+                .columns([GridLength::STAR, GridLength::Auto])
+                .children((
+                    eq_button(
+                        &s.eq,
+                        self.eq_open == Some(id),
+                        context.callback(move |()| Message::ToggleEq(id)),
+                    )
+                    .grid_column(0),
+                    Button::new()
+                        .style(ButtonStyle::Subtle)
+                        .background(if s.eq.bypass {
+                            Brush::Solid(RED)
+                        } else {
+                            Brush::Solid(CARD)
+                        })
+                        .height(24.0)
+                        .min_width(24.0)
+                        .content(
+                            FontIcon::new()
+                                .glyph("\u{ef90}")
+                                .font_size(11.5)
+                                .foreground(Brush::Solid(if s.eq.bypass { INK } else { TEXT })),
+                        )
+                        .on_click(move || {
+                            live.update_eq(|e| e.bypass = !bypass);
+                            invalidator.invalidate();
+                        })
+                        .grid_column(1),
+                ))
+                .into(),
         );
 
         let gain = params.clone();
@@ -151,17 +195,81 @@ impl MixerApp {
 }
 
 /// Colored A/B routing toggle, read from the live atomics and written straight back.
-fn route_chip(params: &Arc<Params>, bus: usize) -> Button {
+fn route_chip(params: &Arc<Params>, bus: usize, view: &MixerView, strip: &StripView) -> View {
     let on = params.routed(bus);
-    let (bg, fg) = if on {
-        (if bus == 0 { GREEN } else { BLUE }, INK)
+    let target = view.buses[bus].device.as_deref();
+    // The engine drops routes that would feed a device back into the same strip. Showing that on the
+    // chip is the only way the user finds out: the fader would otherwise just look quiet.
+    let feedback = on
+        && target.is_some_and(|d| {
+            strip
+                .fed_by
+                .as_deref()
+                .is_some_and(|fed| same_device(fed, d))
+        });
+    // Routed, but the bus points at nothing: amber, because the sound is going nowhere.
+    let stranded = on && !feedback && target.is_none();
+    let (bg, fg) = if feedback {
+        (RED, INK)
+    } else if stranded {
+        (AMBER, INK)
+    } else if on {
+        (bus_color(bus), INK)
     } else {
         (FILL_OFF, TEXT)
+    };
+    let hint = match (on, feedback, target) {
+        (_, true, Some(d)) => format!(
+            "Loops back into itself: bus {} plays into \"{d}\", which is what this strip listens to. \
+             This route is dropped.",
+            bus_name(bus)
+        ),
+        (true, _, None) => format!(
+            "Sent to bus {}, but that bus has no device: nothing comes out. Pick one up top.",
+            bus_name(bus)
+        ),
+        (true, _, Some(d)) => format!("Sent to bus {} -> \"{d}\".", bus_name(bus)),
+        (false, _, Some(d)) => format!("Click to send to bus {} -> \"{d}\".", bus_name(bus)),
+        (false, _, None) => format!(
+            "Click to send to bus {}, which has no device.",
+            bus_name(bus)
+        ),
     };
     let live = params.clone();
     chip(bus_name(bus), bg, fg)
         .width(32.0)
         .on_click(move || live.set_routed(bus, !on))
+        .tooltip(hint)
+        .into()
+}
+
+/// What this strip is listening to, in the fewest words that stay true.
+fn source_caption(s: &StripView) -> (&'static str, Color) {
+    if s.loopback {
+        ("copy of that output", DIM)
+    } else if s.fed_by.is_some() {
+        ("the cable's far end", AMBER)
+    } else {
+        ("microphone", DIM)
+    }
+}
+
+/// The long form of `source_caption`, for a tooltip.
+fn caption_hint(s: &StripView) -> String {
+    if s.loopback {
+        format!(
+            "A copy of everything \"{}\" is playing. It is a source, not a microphone: no other app \
+             can record it.",
+            s.name
+        )
+    } else if let Some(fed) = &s.fed_by {
+        format!(
+            "This is the far end of a virtual cable, not a microphone. It carries whatever some bus \
+             sends into \"{fed}\", and any app that records this device hears that bus."
+        )
+    } else {
+        "Records this microphone directly.".to_string()
+    }
 }
 
 pub(crate) fn mute_chip(params: &Arc<Params>) -> Button {

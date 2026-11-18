@@ -9,7 +9,7 @@
 //! `Mixer` itself holds cpal streams, which are not `Send` on every platform:
 //! keep it on the thread that created it (the GUI's main thread).
 
-use crate::devices::InputSource;
+use crate::devices::{InputSource, fed_by, same_device};
 use crate::engine::{BusSpec, Engine, StripSpec};
 use crate::eq::EqSettings;
 use crate::events::{Event, EventHandler, default_handler};
@@ -38,8 +38,14 @@ pub struct Bus {
 #[derive(Clone)]
 pub struct StripView {
     pub id: StripId,
+    /// Display label: the device name, prefixed with `[Loopback]` for output taps.
     pub label: String,
+    /// Raw device name, without the label decoration.
+    pub name: String,
     pub loopback: bool,
+    /// Render device that physically feeds this source: itself for a loopback tap, the render side
+    /// for a virtual cable's capture side, `None` for a microphone.
+    pub fed_by: Option<String>,
     pub routes: [bool; NUM_BUSES],
     pub gain_db: f32,
     pub muted: bool,
@@ -60,6 +66,34 @@ pub struct MixerView {
     pub running: bool,
     pub strips: Vec<StripView>,
     pub buses: [BusView; NUM_BUSES],
+}
+
+impl MixerView {
+    /// `(strip, bus)` pairs where the strip listens to the very device that bus plays into: a round
+    /// trip through the sound card. Two names means a virtual cable (`CABLE Output` is fed by
+    /// `CABLE Input`). The engine drops these routes when it builds streams; this is how a frontend
+    /// can explain why before the user hears anything.
+    pub fn feedback_loops(&self) -> Vec<(StripId, usize)> {
+        let mut loops = vec![];
+        for strip in &self.strips {
+            let Some(fed) = &strip.fed_by else { continue };
+            for (bus, b) in self.buses.iter().enumerate() {
+                if strip.routes[bus] && b.device.as_deref().is_some_and(|d| same_device(fed, d)) {
+                    loops.push((strip.id, bus));
+                }
+            }
+        }
+        loops
+    }
+
+    /// Capture endpoint that hears this bus, when the bus is the render side of a virtual cable.
+    /// A frontend should still check that the name exists in its capture-device list.
+    pub fn capture_peer(&self, bus: usize) -> Option<String> {
+        self.buses[bus]
+            .device
+            .as_deref()
+            .and_then(crate::devices::capture_peer)
+    }
 }
 
 pub struct Mixer {
@@ -164,7 +198,9 @@ impl Mixer {
                 .map(|s| StripView {
                     id: s.id,
                     label: s.source.label(),
+                    name: s.source.name.clone(),
                     loopback: s.source.loopback,
+                    fed_by: fed_by(&s.source.name, s.source.loopback),
                     routes: std::array::from_fn(|b| s.params.routed(b)),
                     gain_db: s.params.gain_db(),
                     muted: s.params.muted(),
@@ -225,5 +261,85 @@ impl Mixer {
             self.start()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::eq::EqSettings;
+    use crate::params::NUM_BUSES;
+
+    const CABLE_IN: &str = "CABLE Input (VB-Audio Virtual Cable)";
+    const CABLE_OUT: &str = "CABLE Output (VB-Audio Virtual Cable)";
+
+    fn strip(name: &str, loopback: bool, routes: [bool; NUM_BUSES]) -> StripView {
+        StripView {
+            id: 1,
+            label: format!("{}{name}", if loopback { "[Loopback] " } else { "" }),
+            name: name.to_string(),
+            loopback,
+            fed_by: fed_by(name, loopback),
+            routes,
+            gain_db: 0.0,
+            muted: false,
+            eq: Arc::new(EqSettings::default()),
+            params: Arc::new(Params::new(routes)),
+        }
+    }
+
+    fn bus(device: Option<&str>) -> BusView {
+        BusView {
+            device: device.map(str::to_string),
+            gain_db: 0.0,
+            muted: false,
+            params: Arc::new(Params::new([false; NUM_BUSES])),
+        }
+    }
+
+    fn view(strip: StripView, a: Option<&str>, b: Option<&str>) -> MixerView {
+        MixerView {
+            running: false,
+            strips: vec![strip],
+            buses: [bus(a), bus(b)],
+        }
+    }
+
+    #[test]
+    fn a_cable_strip_routed_into_its_own_cable_is_a_loop() {
+        let v = view(strip(CABLE_OUT, false, [true, false]), Some(CABLE_IN), None);
+        assert_eq!(v.feedback_loops(), vec![(1, 0)]);
+    }
+
+    #[test]
+    fn a_loopback_tap_routed_into_the_device_it_taps_is_a_loop() {
+        let v = view(
+            strip("Speakers", true, [false, true]),
+            None,
+            Some("Speakers"),
+        );
+        assert_eq!(v.feedback_loops(), vec![(1, 1)]);
+    }
+
+    #[test]
+    fn a_microphone_can_be_sent_anywhere() {
+        let v = view(
+            strip("Headset Microphone", false, [true, true]),
+            Some(CABLE_IN),
+            Some("Speakers"),
+        );
+        assert!(v.feedback_loops().is_empty());
+        assert_eq!(v.capture_peer(0).as_deref(), Some(CABLE_OUT));
+        assert_eq!(v.capture_peer(1), None);
+    }
+
+    #[test]
+    fn an_unrouted_strip_never_loops() {
+        let v = view(
+            strip(CABLE_OUT, false, [false, false]),
+            Some(CABLE_IN),
+            None,
+        );
+        assert!(v.feedback_loops().is_empty());
     }
 }

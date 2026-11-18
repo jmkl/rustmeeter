@@ -1,4 +1,4 @@
-//! Live caption transcript panel.
+//! Live caption panel: the one line being spoken right now.
 
 use windows_reactor::*;
 
@@ -7,58 +7,39 @@ use crate::theme::*;
 
 impl MixerApp {
     pub(crate) fn transcript(&self) -> View {
-        let lines: Vec<KeyedView> = self
-            .transcript
-            .iter()
-            .map(|(key, line)| {
-                keyed(
-                    *key,
-                    TextBlock::new()
-                        .text(line)
-                        .font_size(11.5)
-                        .text_wrapping(TextWrapping::NoWrap)
-                        .is_text_selection_enabled(true),
-                )
-            })
-            .collect();
+        let latest = self.latest_caption.text.trim();
+        let empty = latest.is_empty();
 
-        let content: View = if lines.is_empty() {
-            TextBlock::new()
-                .text("Captions appear here once you start them.")
-                .font_size(10.0)
-                .foreground(Brush::Solid(DIM))
-                .into()
-        } else {
-            StackPanel::new().spacing(1.0).keyed_children(lines).into()
-        };
+        // One caption, as large as the panel allows. Past lines are not shown here: they are in
+        // `captions.log`, and a wall of scrolling text next to the mixer only made the current line
+        // harder to find.
+        let caption = TextBlock::new()
+            .text(if empty {
+                "Captions appear here once you start them."
+            } else {
+                latest
+            })
+            .font_size(if empty { 12.0 } else { 24.0 })
+            .font_weight(if empty {
+                FontWeight::NORMAL
+            } else {
+                FontWeight::BOLD
+            })
+            .text_alignment(TextAlignment::Center)
+            .text_wrapping(TextWrapping::Wrap)
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .vertical_alignment(VerticalAlignment::Center)
+            .foreground(Brush::Solid(if empty { DIM } else { TEXT }));
 
         Grid::new()
             .grid_row(3)
             .grid_column_span(2)
-            .rows([GridLength::Auto, GridLength::STAR])
+            .rows([
+                GridLength::Auto, // title
+                GridLength::STAR, // caption card, as tall as the panel allows
+            ])
             .row_spacing(6.0)
-            .children((
-                Grid::new()
-                    .columns([GridLength::STAR, GridLength::Auto])
-                    .children((
-                        section_label("TRANSCRIPT"),
-                        TextBlock::new()
-                            .grid_column(1)
-                            .text(self.caps.log_path().display().to_string())
-                            .font_size(9.5)
-                            .foreground(Brush::Solid(DIM)),
-                    )),
-                card(
-                    TextBlock::new()
-                        .grid_column(1)
-                        .text(self.latest_caption.text.clone())
-                        .font_size(20.0)
-                        .font_weight(FontWeight::BOLD)
-                        .text_alignment(TextAlignment::Center)
-                        .foreground(Brush::Solid(DIM)),
-                )
-                .grid_row(1),
-            ))
+            .children((section_label("TRANSCRIPT"), card(caption).grid_row(1)))
             .into()
     }
 }

@@ -10,15 +10,18 @@ pub enum Event {
     Started,
     /// A stream reported an error (device unplugged, format change, ...).
     Error(String),
+    /// The engine worked around a routing problem the user should know about (a route that would
+    /// feed a device back into itself, ...). Audio keeps running; the route is dropped.
+    Warning(String),
 }
 
 pub type EventHandler = Arc<dyn Fn(&Event) + Send + Sync>;
 
-/// Default: print errors to stderr.
+/// Default: print errors and warnings to stderr.
 pub(crate) fn default_handler() -> EventHandler {
-    Arc::new(|e| {
-        if let Event::Error(m) = e {
-            eprintln!("error: {m}");
-        }
+    Arc::new(|e| match e {
+        Event::Error(m) => eprintln!("error: {m}"),
+        Event::Warning(m) => eprintln!("warning: {m}"),
+        Event::Started => {}
     })
 }

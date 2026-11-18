@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/cactus-core", "crates/rustmeeter-core", "crates/rustmeeter", "crates/rustmeeter-cli"]
+members = ["crates/cactus-core", "crates/rustmeeter-core", "crates/rustmeeter", "crates/rustmeeter-cli", "crates/recorder"]
 
 [workspace.package]
 version = "0.1.0"

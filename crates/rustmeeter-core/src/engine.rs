@@ -1,7 +1,7 @@
 //! Low-level audio engine (internal; use `Mixer` instead): N input strips -> per-strip parametric EQ/gain/mute -> 2 output buses (A, B).
 //! Inputs can be real mics or WASAPI loopback (any output device used as a source).
 
-use crate::devices::{InputSource, find_input, find_output};
+use crate::devices::{InputSource, fed_by, find_input, find_output, same_device};
 use crate::eq::EQ_MAX_BANDS;
 use crate::events::{Event, EventHandler};
 use crate::params::{NUM_BUSES, Params, db_to_lin};
@@ -273,6 +273,17 @@ where
 
 // ---------- public engine ----------
 
+fn bus_label(bus: usize) -> String {
+    format!("bus {}", if bus == 0 { "A" } else { "B" })
+}
+
+/// A strip that listens to a device while a bus plays into that same device is a round trip through
+/// the sound card, so the level never settles. A virtual cable only makes the two ends carry
+/// different names: `CABLE Output` is fed by `CABLE Input`, which is exactly what a bus targets.
+fn is_feedback(source: &InputSource, bus_device: &str) -> bool {
+    fed_by(&source.name, source.loopback).is_some_and(|fed| same_device(&fed, bus_device))
+}
+
 pub struct StripSpec {
     pub source: InputSource,
     pub params: Arc<Params>,
@@ -314,6 +325,8 @@ impl Engine {
 
         let mut readers: Vec<Vec<Reader>> = (0..NUM_BUSES).map(|_| vec![]).collect();
         let mut streams: Vec<Stream> = vec![];
+        // Dropped routes are reported once each, after the streams exist.
+        let mut warnings: Vec<String> = vec![];
 
         for s in strips {
             let (dev, cfg) = if s.source.loopback {
@@ -336,6 +349,18 @@ impl Engine {
             let mut prods = vec![];
             for (bi, o) in outs.iter().enumerate() {
                 if let Some((_, oc)) = o {
+                    if let Some(bus_dev) = &buses[bi].device {
+                        if is_feedback(&s.source, bus_dev) {
+                            warnings.push(format!(
+                                "{} -> {} ({}): '{bus_dev}' is the device this strip listens to, \
+                                 so routing it there would loop back into itself; route dropped",
+                                s.source.label(),
+                                bus_label(bi),
+                                bus_dev
+                            ));
+                            continue;
+                        }
+                    }
                     let rb = HeapRb::<f32>::new(in_rate as usize); // ~0.5 s stereo
                     let (p, c) = rb.split();
                     prods.push((bi, p));
@@ -396,7 +421,7 @@ impl Engine {
 
         for (bi, o) in outs.into_iter().enumerate() {
             if let Some((dev, cfg)) = o {
-                let bus_label = format!("bus {}", if bi == 0 { "A" } else { "B" });
+                let bus_label = bus_label(bi);
                 let mixer = BusMixer {
                     readers: std::mem::take(&mut readers[bi]),
                     params: buses[bi].params.clone(),
@@ -421,6 +446,10 @@ impl Engine {
                 stream.play()?;
                 streams.push(stream);
             }
+        }
+
+        for w in warnings {
+            (*handler)(&Event::Warning(w));
         }
 
         Ok(Engine { _streams: streams })

@@ -16,6 +16,8 @@ pub const EQ_Q_MIN: f32 = 0.1;
 pub const EQ_Q_MAX: f32 = 10.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "kebab-case"))]
 pub enum EqKind {
     HighPass,
     LowShelf,
@@ -84,16 +86,33 @@ impl EqKind {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct EqBand {
     pub enabled: bool,
     pub kind: EqKind,
+    /// Centre (or corner) frequency, in Hz.
     pub freq_hz: f32,
+    /// Boost or cut, in dB. Ignored by the pass filters.
     pub gain_db: f32,
     pub q: f32,
 }
 
 fn finite_or(x: f32, default: f32) -> f32 {
     if x.is_finite() { x } else { default }
+}
+
+impl Default for EqBand {
+    /// A neutral bell at 1 kHz: what an omitted field in a settings file becomes.
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            kind: EqKind::Bell,
+            freq_hz: 1000.0,
+            gain_db: 0.0,
+            q: EqKind::Bell.default_q(),
+        }
+    }
 }
 
 impl EqBand {
@@ -155,6 +174,8 @@ impl EqBand {
 }
 
 #[derive(Clone, PartialEq, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct EqSettings {
     pub bypass: bool,
     pub bands: Vec<EqBand>,

@@ -5,7 +5,7 @@
 //! Frontends only choose what happens to each caption line via the callback
 //! (CLI: print it; GUI: push into a channel and request a repaint).
 
-use crate::captions::{Caption, CaptionLogger, SharedTranscriber};
+use crate::captions::{Caption, CaptionLogger, CaptionStatus, SharedTranscriber};
 use crate::mixer::Mixer;
 use anyhow::{Result, anyhow, bail};
 use std::path::{Path, PathBuf};
@@ -112,6 +112,11 @@ impl CaptionController {
     /// 1-based strip number being captioned, if running.
     pub fn active_strip(&self) -> Option<usize> {
         self.logger.as_ref().and(self.strip)
+    }
+
+    /// Live state of the running session, for a UI to poll each frame.
+    pub fn status(&self) -> Option<Arc<CaptionStatus>> {
+        self.logger.as_ref().map(|l| l.status())
     }
 
     pub fn model_loaded(&self) -> bool {

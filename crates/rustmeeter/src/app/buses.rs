@@ -17,7 +17,7 @@ impl MixerApp {
             .rows([GridLength::Auto, GridLength::STAR])
             .row_spacing(6.0)
             .children((
-                section_label("BUSES"),
+                section_label("OUTPUT BUSES"),
                 card(
                     Grid::new()
                         .rows([GridLength::STAR])
@@ -39,12 +39,15 @@ impl MixerApp {
             .device
             .clone()
             .unwrap_or_else(|| "no device".to_string());
+        // Who hears this bus, and why: the answer to "so what does A actually do?"
+        let (role, hint) = self.bus_role(view, bus);
+        let peer = self.bus_capture_peer(view, bus);
 
         let header = Grid::new()
             .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
             .column_spacing(6.0)
             .children((
-                badge(bus_name(bus), if bus == 0 { GREEN } else { BLUE }),
+                badge(bus_name(bus), bus_color(bus)),
                 TextBlock::new()
                     .grid_column(1)
                     .text(&device)
@@ -55,9 +58,28 @@ impl MixerApp {
                         DIM
                     }))
                     .text_trimming(TextTrimming::CharacterEllipsis)
-                    .vertical_alignment(VerticalAlignment::Center),
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .tooltip(&device),
                 mute_chip(param).grid_column(2).height(20.0),
             ));
+
+        // The device name, then what that device means. For a cable, name the endpoint apps actually
+        // pick as their microphone: the one piece of information no other part of the UI can give.
+        let mut title: Vec<View> = vec![
+            header.into(),
+            caption(role, self.bus_role_color(view, bus))
+                .tooltip(&hint)
+                .into(),
+        ];
+        if let Some(peer) = &peer {
+            title.push(
+                caption(&format!("\"{peer}\""), AMBER)
+                    .tooltip(format!(
+                        "Apps that record \"{peer}\" as their microphone hear everything routed here."
+                    ))
+                    .into(),
+            );
+        }
 
         let vfader = fader(200., param.gain_db(), param.level_db(), move |db| {
             gain.set_gain_db(db)
@@ -95,7 +117,7 @@ impl MixerApp {
                     .children((
                         Border::new()
                             .grid_row(0)
-                            .content(header)
+                            .content(StackPanel::new().spacing(1.0).children(title))
                             .vertical_alignment(VerticalAlignment::Top),
                         Border::new().grid_row(1).content(vfader),
                         Border::new().grid_row(2).content(gain_txt),
@@ -103,5 +125,16 @@ impl MixerApp {
             )
             .grid_column(bus as i32)
             .into()
+    }
+
+    /// Amber for the one role that surprises people: a "speaker" that other apps record.
+    fn bus_role_color(&self, view: &MixerView, bus: usize) -> Color {
+        if view.buses[bus].device.is_none() {
+            DIM
+        } else if self.bus_capture_peer(view, bus).is_some() {
+            AMBER
+        } else {
+            DIM
+        }
     }
 }

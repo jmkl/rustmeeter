@@ -4,3 +4,4 @@ captions.log
 cactus/*.cact
 *.zip
 zip_files/
+finetune/

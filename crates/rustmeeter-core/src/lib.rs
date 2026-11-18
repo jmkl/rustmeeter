@@ -25,10 +25,15 @@ mod vad;
 #[cfg(feature = "cactus")]
 pub use cactus::{Agent, Cactus, Mirage, Models, Whistle};
 pub use caption_controller::{CaptionCallback, CaptionController};
-pub use captions::{Caption, CaptionLogger, SharedTranscriber, Transcriber, share_transcriber};
-pub use devices::{
-    InputSource, default_input_name, default_output_name, list_inputs, list_outputs,
+pub use captions::{
+    Caption, CaptionLogger, CaptionState, CaptionStatus, SharedTranscriber, Transcriber,
+    share_transcriber,
 };
+pub use devices::{
+    InputSource, capture_peer, default_input_name, default_output_name, fed_by, list_inputs,
+    list_outputs, same_device,
+};
+
 pub use eq::{
     EQ_FREQ_MAX, EQ_FREQ_MIN, EQ_GAIN_MAX, EQ_GAIN_MIN, EQ_MAX_BANDS, EQ_Q_MAX, EQ_Q_MIN, EqBand,
     EqKind, EqSettings,

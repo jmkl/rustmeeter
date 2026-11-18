@@ -9,12 +9,15 @@ ringbuf = "0.3"
 biquad = "0.4"
 anyhow = "1"
 chrono = "0.4"
+serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 cactus-core = { path = "../cactus-core", optional = true }
 
 [features]
 default = ["cactus"]
 cactus = ["dep:cactus-core", "dep:serde_json"]
+# `Serialize`/`Deserialize` for the settings types (`EqSettings`), so a frontend can store them.
+serde = ["dep:serde"]
 
 [lib]
 name = "rustmeeter_core"

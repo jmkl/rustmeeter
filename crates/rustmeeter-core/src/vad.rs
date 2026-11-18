@@ -59,6 +59,12 @@ impl Segmenter {
         out
     }
 
+    /// True between the first voiced frame and the end of the hangover: an utterance is being
+    /// collected. Frontends use it to show "hearing speech" while the model is still idle.
+    pub fn in_speech(&self) -> bool {
+        self.in_speech
+    }
+
     fn process(&mut self, frame: Vec<i16>, out: &mut Vec<Utterance>) {
         let db = rms_db(&frame);
         let thr = (self.floor_db + 12.0).max(-50.0);

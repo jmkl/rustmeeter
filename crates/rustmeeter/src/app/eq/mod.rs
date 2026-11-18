@@ -398,8 +398,9 @@ pub(crate) fn eq_button(eq: &EqSettings, open: bool, click: impl IntoUnitCallbac
     Button::new()
         .style(ButtonStyle::Subtle)
         .background(Brush::Solid(if open { BLUE } else { FILL_OFF }))
+        .horizontal_alignment(HorizontalAlignment::Stretch)
+
         .height(24.0)
-        .width(152.0)
         .content(
             TextBlock::new()
                 .text(format!("{} {label}", if open { "▾" } else { "▸" }))

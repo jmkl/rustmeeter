@@ -106,6 +106,11 @@ impl Params {
         self.routes[bus].store(on, Relaxed)
     }
 
+    /// Every route flag at once, for saving a strip and putting it back later.
+    pub fn routes(&self) -> [bool; NUM_BUSES] {
+        std::array::from_fn(|bus| self.routes[bus].load(Relaxed))
+    }
+
     /// Post-fader peak, linear (0.0..1.0), with a short decay. Poll this for meters.
     pub fn level(&self) -> f32 {
         self.level.get()

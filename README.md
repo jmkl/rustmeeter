@@ -153,6 +153,41 @@ eq 1 reset
 **Code:** `rustmeeter-core/src/eq.rs` (model, filter design, curve), `Params::eq()/set_eq()/update_eq()`,
 `engine.rs` (`Reader::refresh_eq`). `cargo test -p rustmeeter-core` checks the filter responses.
 
+**Saved settings (GUI).** Everything you set on a strip — EQ, fader position, mute and A/B routing —
+is written to `%APPDATA%\rustmeeter\config.json`, keyed by the source name rather than by the strip's
+position. Adding a device again (now or in a later session) puts it back the way you left it. Fields
+left at their defaults are not written at all: a strip at unity, unmuted, with a flat EQ has no line
+in the file, and `Reset` removes the last field instead of leaving `{}` behind. The file is written
+once the controls settle (about half a second after the last change) and again on exit, so dragging a
+dot or a fader does not touch the disk 30 times a second. It is plain JSON and safe to hand-edit;
+values are clamped into their legal ranges on load, and an unreadable file is moved to
+`config.broken.json` rather than blocking startup.
+
+```json
+{
+  "model_root": "C:\\models\\cactus",
+  "strips": {
+    "Headset Microphone (MH752)": {
+      "eq": {
+        "bypass": false,
+        "bands": [
+          { "enabled": true, "kind": "bell", "freq_hz": 3200.0, "gain_db": 4.5, "q": 2.0 }
+        ]
+      },
+      "gain_db": 2.5,
+      "muted": false,
+      "routes": [false, true]
+    }
+  }
+}
+```
+
+`routes` is one flag per bus, in A/B order and omitted while the strip still uses the default for its
+kind (microphones → B, loopback taps → A). Bands default every omitted field, so
+`{ "kind": "high-pass", "freq_hz": 80.0 }` is a valid band. Older builds kept `model_root` in a
+`key = value` file named `config`; it is read once on first run to carry that path over and then left
+untouched.
+
 ## 4. Troubleshooting
 
 - **I hear my own voice in the headphones.** Run `status`. A strip routed to `A` that is a
@@ -203,7 +238,7 @@ Key ideas:
 
 - Streaming transcription (`cactus_stream_transcribe_process`) for captions while still speaking
 - Needle 3 (tool calling) on the transcript: voice commands like "mute my mic" (wake word first)
-- Save/load settings (JSON), GUI polish (per-strip width, transcript auto-scroll), per-app capture
+- GUI polish (per-strip width), per-app capture
 - Own virtual audio driver (SysVAD fork) instead of VB-Cable
 
 ## 7. GUI (optional, feature `gui`)
@@ -222,16 +257,17 @@ the rest up with the device pickers and "Add input".
 - **Strip cards**: source name, A/B route checkboxes, an **EQ** button (opens the parametric EQ editor), fader with a dB
   readout, mute, level meter, remove.
 - **Bus cards**: bus name, device, and the same fader (gain, mute, meter).
-- **Transcript**: the last 500 captions, also written to `captions.log`; errors show up in an info
-  bar above.
+- **Transcript**: the line being spoken right now, large and centred in its panel. Only the current
+  line is on screen — the full history stays in `captions.log`, which keeps the mixer readable and
+  stops a wall of text from pushing the caption away.
 
 Meters are refreshed by a 33 ms timer. Faders and route checkboxes write the `Params` atomics
 directly, so they are instant; adding/removing a strip or changing a bus device rebuilds the
 streams (`Mixer::apply()`), which is an audible restart, just like `add`/`bus` in the CLI.
 
 Caveats:
-- The transcript does not auto-scroll — scroll it yourself. reactor's `ScrollViewer` has no
-  scroll-to-end call.
+- The transcript shows the current line only, so there is nothing to auto-scroll; the log file keeps
+  the history.
 - The first "Start captions" blocks the window while the Whistle model loads. That is a one-time
   cost per process; stopping and starting again is instant.
 - Strip cards have a fixed width, so with many strips the cards area scrolls both ways.
@@ -262,7 +298,7 @@ For the standard "mic into Discord/OBS, desktop to my headphones" setup:
 
 Two smaller notes:
 
-- Newly added mics default to B and loopback sources default to A (`AddInput` in `main.rs`), so strip 2 should have arrived with B checked — it looks like B was clicked off. Re-check B; if a freshly added strip comes up unchecked again, tell me and I'll debug the checkbox binding.
+- Newly added mics default to B and loopback sources default to A (`default_routes` in `app/mod.rs`), so strip 2 should have arrived with B checked — it looks like B was clicked off. Re-check B; if a freshly added strip comes up unchecked again, tell me and I'll debug the checkbox binding.
 - Captions: with strip 1 being the virtual-cable capture, "first mic" correctly resolves to **strip 2** — that's the one Whisper should transcribe. Captions also don't need any A/B routing, the tap is pre-fader.
 
-Minor UI stuff I can tidy if you want: the strip cards are a bit narrow (the EQ sliders and the B box on strip 2 sit right on the card edge), and the transcript doesn't auto-scroll (reactor's `ScrollViewer` exposes no scroll-to-end API).
+Minor UI stuff I can tidy if you want: the strip cards are a bit narrow (the EQ sliders and the B box on strip 2 sit right on the card edge).

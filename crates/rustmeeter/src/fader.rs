@@ -8,7 +8,7 @@
 use rustmeeter_core::{MAX_DB, MIN_DB};
 use windows_reactor::*;
 
-use crate::theme::{CAP, CAP_EDGE, CYAN, DIM, GROOVE, vmeter};
+use crate::theme::{CAP, CAP_EDGE, DIM, GREEN,  TRACK_BG, vmeter};
 
 /// Height shared by the groove, the scale and the meter.
 // pub(crate) const fader_h: f64 = 150.0;
@@ -16,10 +16,10 @@ use crate::theme::{CAP, CAP_EDGE, CYAN, DIM, GROOVE, vmeter};
 const CAP_W: f64 = 35.0;
 const CAP_H: f64 = 16.0;
 const WELL_W: f64 = 52.0;
-const TRACK_W: f64 = 5.0;
+const TRACK_W: f64 = 10.0;
 const LABEL_W: f64 = 30.0;
 /// Width of the level meter next to the groove.
-const METER_W: f64 = 12.0;
+const METER_W: f64 = 24.0;
 
 /// Printed scale, top to bottom. The tick spacing is deliberately even while the dB steps are
 /// not, so the range around 0 dB gets most of the travel (a console-style fader taper).
@@ -69,16 +69,16 @@ pub(crate) fn fader(
     let groove = Border::new()
         .width(TRACK_W)
         .height(fader_h)
-        .corner_radius(TRACK_W / 2.0)
-        .background(Brush::Solid(GROOVE))
+        .corner_radius(2.0)
+        .background(Brush::Solid(TRACK_BG))
         .canvas_left((WELL_W - TRACK_W) / 2.0)
         .canvas_top(0.0);
 
     let fill = Border::new()
         .width(TRACK_W)
         .height(fill_h)
-        .corner_radius(TRACK_W / 2.0)
-        .background(Brush::Solid(CYAN))
+        .corner_radius(2.0)
+        .background(Brush::Solid(GREEN))
         .canvas_left((WELL_W - TRACK_W) / 2.0)
         .canvas_top(fader_h - fill_h);
 
@@ -95,7 +95,7 @@ pub(crate) fn fader(
             Border::new()
                 .height(3.0)
                 .corner_radius(1.5)
-                .background(Brush::Solid(CYAN))
+                .background(Brush::Solid(GREEN))
                 .vertical_alignment(VerticalAlignment::Center),
         );
 
@@ -103,7 +103,7 @@ pub(crate) fn fader(
         .width(WELL_W)
         .height(fader_h)
         // Transparent rather than absent: the gaps between the children must still hit-test.
-        .background(Brush::Solid(Color::argb(0x00, 0x00, 0x00, 0x00)))
+        .background(Brush::Solid(Color::argb(0x00, 0x00, 0x00, 0x0)))
         .capture_pointer_on_press(true)
         .on_pointer_pressed(move |p: PointerEventInfo| {
             if p.is_left_button_pressed {
@@ -128,7 +128,6 @@ pub(crate) fn fader(
             GridLength::Pixel(WELL_W),
             GridLength::Auto,
         ])
-        .column_spacing(6.0)
         .horizontal_alignment(HorizontalAlignment::Center)
         .children((
             scale,

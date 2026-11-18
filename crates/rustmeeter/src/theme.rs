@@ -26,6 +26,7 @@ pub(crate) const CYAN: Color = Color::rgb(0x3F, 0xC9, 0xE8);
 pub(crate) const CAP: Color = Color::rgb(0xC9, 0xD2, 0xDC);
 pub(crate) const CAP_EDGE: Color = Color::argb(0xE6, 0x0A, 0x12, 0x1A);
 pub(crate) const GROOVE: Color = Color::rgb(0x10, 0x15, 0x1E);
+pub(crate) const TRACK_BG: Color = Color::argb(0x22,0x10, 0x10, 0x10);
 
 /// Translucent, rounded panel used for every group.
 pub(crate) fn card(child: impl Into<View>) -> Border {
@@ -83,6 +84,38 @@ pub(crate) fn section_label(text: &str) -> TextBlock {
         .vertical_alignment(VerticalAlignment::Center)
 }
 
+/// Same voice as `section_label`, one step smaller: the one-line caption under a control.
+pub(crate) fn caption(text: &str, color: Color) -> TextBlock {
+    TextBlock::new()
+        .text(text)
+        .font_size(8.5)
+        .character_spacing(60)
+        .font_weight(FontWeight::SEMI_BOLD)
+        .foreground(Brush::Solid(color))
+        .text_trimming(TextTrimming::CharacterEllipsis)
+        .vertical_alignment(VerticalAlignment::Center)
+}
+
+/// Small directional glyph for "this goes there" labels.
+pub(crate) fn arrow() -> TextBlock {
+    TextBlock::new()
+        .text("\u{2192}")
+        .font_size(11.0)
+        .foreground(Brush::Solid(DIM))
+        .vertical_alignment(VerticalAlignment::Center)
+}
+
+/// A and B are brand colours, not accents: the route chips, the badges and the faders all agree.
+pub(crate) fn bus_color(bus: usize) -> Color {
+    if bus == 0 { GREEN } else { BLUE }
+}
+
+/// Place an already-built `View` in a grid cell. Declaration types carry `grid_column` themselves;
+/// a `View` (the result of `.tooltip()`, for instance) does not, so wrap it.
+pub(crate) fn in_column(child: impl Into<View>, column: i32) -> Border {
+    Border::new().grid_column(column).content(child)
+}
+
 /// Filled button: transport and caption actions. Local background wins over the style, so the
 /// color is stable (Subtle style keeps the flat look and rounded corners).
 pub(crate) fn action_button(
@@ -134,17 +167,79 @@ pub(crate) fn x_button(click: impl IntoUnitCallback) -> Button {
         .on_click(click)
 }
 
+/// A small filled dot, for "state at a glance" rows.
+pub(crate) fn dot(color: Color) -> Border {
+    Border::new()
+        .width(8.0)
+        .height(8.0)
+        .corner_radius(4.0)
+        .background(Brush::Solid(color))
+}
+
+/// A tiny level history: the "is it hearing anything?" graph.
+///
+/// Deliberately unlabelled and 16 px tall: it answers one question, and the answer is the shape.
+/// Two details make it readable at this size. Levels are converted to dB and mapped over
+/// −60…0 dB, because linear RMS puts normal speech within 2 px of the floor. And when there are
+/// more samples than bars, each bar keeps the loudest sample in its bucket, so a short word stays
+/// visible instead of being drawn 1 px wide and skipped by the display.
+pub(crate) fn spark(values: &[f32], width: f64, height: f64) -> Border {
+    const GAP: f64 = 1.0;
+    const MIN_BAR: f64 = 3.0;
+    let count = ((width + GAP) / (MIN_BAR + GAP)).floor().max(1.0) as usize;
+    let count = count.min(values.len().max(1));
+    let bar_w = ((width - (count - 1) as f64 * GAP) / count as f64).max(1.0);
+
+    // One bar per bucket; `max` so a transient is not averaged away.
+    let levels: Vec<f32> = (0..count)
+        .map(|i| {
+            let start = i * values.len() / count;
+            let end = ((i + 1) * values.len() / count)
+                .max(start + 1)
+                .min(values.len());
+            values[start..end].iter().copied().fold(0.0, f32::max)
+        })
+        .collect();
+
+    let mut bars: Vec<View> = vec![
+        // Baseline: "flat" reads as a line at the bottom rather than as an empty box.
+        Border::new()
+            .width(width)
+            .height(1.0)
+            .background(Brush::Solid(Color::argb(0x66, 0x3F, 0xC9, 0xE8)))
+            .canvas_left(0.0)
+            .canvas_top(height - 1.0)
+            .into(),
+    ];
+    bars.extend(levels.iter().enumerate().map(|(i, &v)| {
+        let db = 20.0 * v.max(1e-6).log10(); // 0..1 linear -> dBFS
+        let norm = ((db + 60.0) / 60.0).clamp(0.0, 1.0);
+        let h = (f64::from(norm) * height).max(1.0);
+        Border::new()
+            .width(bar_w)
+            .height(h)
+            .corner_radius(0.5)
+            .background(Brush::Solid(CYAN))
+            .canvas_left(i as f64 * (bar_w + GAP))
+            .canvas_top(height - h)
+            .into()
+    }));
+
+    Border::new()
+        .width(width)
+        .height(height)
+        .corner_radius(2.0)
+        .background(Brush::Solid(GROOVE))
+        .content(Canvas::new().width(width).height(height).children(bars))
+}
+
 pub(crate) fn run_state(running: bool) -> View {
     StackPanel::new()
         .orientation(Orientation::Horizontal)
         .spacing(6.0)
         .vertical_alignment(VerticalAlignment::Center)
         .children((
-            Border::new()
-                .width(8.0)
-                .height(8.0)
-                .corner_radius(4.0)
-                .background(Brush::Solid(if running { GREEN } else { RED })),
+            dot(if running { GREEN } else { RED }),
             TextBlock::new()
                 .text(if running { "Running" } else { "Stopped" })
                 .font_size(10.5)
@@ -176,7 +271,7 @@ pub(crate) fn vmeter(db: f32, width: f64, height: f64) -> Border {
                 .background(Brush::Solid(if lit {
                     segment_color(seg_db)
                 } else {
-                    GROOVE
+                    TRACK_BG
                 }))
                 .canvas_left(0.0)
                 .canvas_top(height - (i + 1.0) * seg_h - i * SEG_GAP)
@@ -188,7 +283,7 @@ pub(crate) fn vmeter(db: f32, width: f64, height: f64) -> Border {
         .width(width)
         .height(height)
         .corner_radius((width / 2.0).min(3.0))
-        .background(Brush::Solid(GROOVE))
+        .background(Brush::Solid(TRACK_BG))
         .content(Canvas::new().width(width).height(height).children(segments))
 }
 
