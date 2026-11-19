@@ -26,7 +26,7 @@ pub(crate) const CYAN: Color = Color::rgb(0x3F, 0xC9, 0xE8);
 pub(crate) const CAP: Color = Color::rgb(0xC9, 0xD2, 0xDC);
 pub(crate) const CAP_EDGE: Color = Color::argb(0xE6, 0x0A, 0x12, 0x1A);
 pub(crate) const GROOVE: Color = Color::rgb(0x10, 0x15, 0x1E);
-pub(crate) const TRACK_BG: Color = Color::argb(0x22,0x10, 0x10, 0x10);
+pub(crate) const TRACK_BG: Color = Color::argb(0x22, 0x10, 0x10, 0x10);
 
 /// Translucent, rounded panel used for every group.
 pub(crate) fn card(child: impl Into<View>) -> Border {

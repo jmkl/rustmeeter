@@ -5,15 +5,20 @@
 //! component's private fields without widening them to the whole crate.
 
 mod buses;
+mod caption_window;
 mod eq;
 mod status;
 mod strips;
 mod toolbar;
 mod transcript;
 
+pub(crate) use caption_window::{CaptionWindow, CaptionWindowInput};
+
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rustmeeter_core::*;
@@ -47,60 +52,122 @@ fn default_routes(loopback: bool) -> [bool; NUM_BUSES] {
     }
 }
 
-pub(crate) struct MixerApp {
-    mixer: Mixer,
-    caps: CaptionController,
-    inputs: Vec<InputSource>,
-    outputs: Vec<String>,
-    caption_strip: Option<usize>, // 1-based; None = first mic
-    add_index: Option<usize>,     // selection in the "add input" combo
-    error: Option<String>,
-    timer: Option<ComponentTimer>,
-    eq_open: Option<StripId>,
-    eq_drag: Option<EqDrag>,
-    /// Repaint requests for the open EQ graph's Direct2D canvas (see `draw_eq_curve`).
-    eq_invalidator: Invalidator,
-    /// Window client width in DIPs; sizes the EQ band table (see `eq_table_width`).
-    window_w: f64,
-    config: Conf,
-    latest_caption: Caption,
-    /// Settings as of the last edit check, and as they are on disk: the difference is what has to
-    /// be written. Diffing the live `Params` catches every control (fader, mute, route chips, EQ
-    /// drag, table slider, bypass, reset) without a "something changed" message per widget.
-    pending: LiveStrips,
-    saved: LiveStrips,
-    /// When a pending change should be written.
-    save_at: Option<Instant>,
+/// Persistent state that must outlive the window. `Mixer` owns cpal audio streams and
+/// `CaptionController` owns the loaded whisper model: both are expensive to recreate and must keep
+/// running while the window is hidden or closed to tray.
+///
+/// Wrapped in `Rc<RefCell<>>` so the `Application` root and the per-window `Component` can share
+/// it. Everything here runs on the single UI thread, so no `Arc` needed for the wrapper.
+pub(crate) struct SharedMixer {
+    pub(crate) mixer: Mixer,
+    pub(crate) caps: CaptionController,
+    pub(crate) config: Conf,
+    pub(crate) caption_strip: Option<usize>, // 1-based; None = first mic
+    pub(crate) latest_caption: Caption,
+    /// Settings as of the last edit check, and as they are on disk.
+    pub(crate) pending: LiveStrips,
+    pub(crate) saved: LiveStrips,
+    pub(crate) save_at: Option<Instant>,
+    /// Completion handle for the current window component. Event and caption callbacks clone from
+    /// this slot; a stale (closed) completion silently drops messages, which is fine while the
+    /// window is closed.
+    pub(crate) completion_slot: Arc<Mutex<Option<ComponentCompletion<Message>>>>,
 }
 
-impl MixerApp {
-    fn start(&mut self) {
-        if let Err(e) = self.mixer.start() {
-            self.error = Some(format!("{e:#}"));
+pub(crate) type SharedMixerRef = Rc<RefCell<SharedMixer>>;
+
+/// Newtype for `SharedMixerRef` that satisfies `Component::Input: Clone + PartialEq + 'static`.
+/// Two handles are equal iff they point to the same allocation (pointer identity).
+#[derive(Clone)]
+pub(crate) struct SharedMixerInput(pub SharedMixerRef);
+
+impl PartialEq for SharedMixerInput {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl SharedMixer {
+    /// Build the mixer, caption controller and config. Audio is **not** started here: the first
+    /// `MixerApp` creation calls `mixer.start()` so that errors can be shown in the window.
+    pub(crate) fn new() -> SharedMixerRef {
+        let completion_slot: Arc<Mutex<Option<ComponentCompletion<Message>>>> =
+            Arc::new(Mutex::new(None));
+
+        let mut mixer = Mixer::new();
+        {
+            let slot = completion_slot.clone();
+            mixer.set_event_handler(Arc::new(move |e: &Event| {
+                let e = e.clone();
+                if let Some(completion) = slot.lock().unwrap().clone() {
+                    _ = completion.complete_with(move || Message::Event(e));
+                }
+            }));
         }
-    }
 
-    /// Rebuild the streams after a structural change; a failed apply stays dirty in the `Mixer`.
-    fn apply(&mut self) {
-        if let Err(e) = self.mixer.apply() {
-            self.error = Some(format!("{e:#}"));
+        let config = Conf::load().expect("Failed to load config");
+
+        let whistle_cact = config
+            .settings
+            .model_root
+            .as_ref()
+            .map(|root| root.join("whistle.cact"))
+            .unwrap_or_else(|| PathBuf::from("whistle.cact"));
+
+        let caps = {
+            let slot = completion_slot.clone();
+            CaptionController::new(
+                PathBuf::from(whistle_cact),
+                PathBuf::from(&config.log),
+                Some("en".to_owned()),
+                None,
+                Arc::new(move |c: &Caption| {
+                    let c = c.clone();
+                    if let Some(completion) = slot.lock().unwrap().clone() {
+                        _ = completion.complete_with(move || Message::Caption(c));
+                    }
+                }),
+            )
+        };
+
+        mixer.set_bus_device(0, default_output_name());
+        if let Some(name) = default_input_name() {
+            mixer.add_strip(
+                InputSource {
+                    name,
+                    loopback: false,
+                },
+                default_routes(false),
+            );
         }
+
+        let mut shared = Self {
+            mixer,
+            caps,
+            caption_strip: None,
+            latest_caption: Caption::default(),
+            pending: LiveStrips::new(),
+            saved: LiveStrips::new(),
+            save_at: None,
+            completion_slot,
+            config,
+        };
+
+        for id in shared.mixer.strips().iter().map(|s| s.id) {
+            shared.restore_strip(id);
+        }
+        shared.pending = shared.live_strips();
+        shared.saved = shared.pending.clone();
+
+        Rc::new(RefCell::new(shared))
     }
 
-    pub(crate) fn strip_params(&self, id: StripId) -> Option<Arc<Params>> {
-        self.mixer.strip(id).map(|s| s.params.clone())
-    }
+    // ----- settings persistence (moved from MixerApp) -----
 
-    // ----- settings persistence -----
-
-    /// Everything one strip remembers, with defaults as `None`/false so that `set_strip` can drop
-    /// a line that says nothing.
     fn strip_settings(strip: &Strip) -> StripSettings {
         let eq = strip.params.eq();
         StripSettings {
-            // Bypassed still counts as configured: un-bypassing must not lose the curve.
             eq: (eq.bypass || !eq.bands.is_empty()).then(|| (*eq).clone()),
-            // The fader snaps to steps, but a hair below zero must not become a saved "-0.02".
             gain_db: Some(strip.params.gain_db()).filter(|db| zeroed(*db) != 0.0),
             muted: strip.params.muted(),
             routes: Some(strip.params.routes())
@@ -108,7 +175,6 @@ impl MixerApp {
         }
     }
 
-    /// Every strip's settings, keyed by source label.
     fn live_strips(&self) -> LiveStrips {
         self.mixer
             .strips()
@@ -117,8 +183,6 @@ impl MixerApp {
             .collect()
     }
 
-    /// Put a freshly added strip back the way its device was left last time: gain, mute, routing
-    /// and EQ. Called on every strip creation, so settings follow the device rather than the slot.
     fn restore_strip(&self, id: StripId) {
         let Some(strip) = self.mixer.strip(id) else {
             return;
@@ -140,42 +204,77 @@ impl MixerApp {
         }
     }
 
-    /// Debounced write of the settings.
-    ///
-    /// Runs from the meter tick: while the controls are still moving the deadline is pushed back,
-    /// so a drag writes once when it ends. Writing is a few hundred bytes to one file, but doing it
-    /// per pointer move would be 30 writes a second for no benefit.
-    fn sync_settings(&mut self, now: Instant) {
+    /// Debounced write of the settings. Returns an error message on I/O failure.
+    fn sync_settings(&mut self, now: Instant) -> Result<(), String> {
         let live = self.live_strips();
         if live != self.pending {
             self.pending = live;
             self.save_at = Some(now + SETTINGS_SAVE_DELAY);
-            return;
+            return Ok(());
         }
         if !self.save_at.is_some_and(|due| now >= due) {
-            return;
+            return Ok(());
         }
         self.save_at = None;
-        self.flush_settings();
+        self.flush_settings()
     }
 
-    /// Write the pending settings now (also used when the app is closing).
-    ///
-    /// Only strips that still exist are written; a device whose strip was removed keeps its line in
-    /// the file, which is what makes it come back configured when it is added again.
-    fn flush_settings(&mut self) {
+    /// Write the pending settings now. Returns an error message on I/O failure.
+    fn flush_settings(&mut self) -> Result<(), String> {
         if self.pending == self.saved {
-            return;
+            return Ok(());
         }
         for (label, settings) in &self.pending {
             self.config.settings.set_strip(label, settings.clone());
         }
         match self.config.save() {
-            Ok(()) => self.saved = self.pending.clone(),
-            // Keep the change pending, and say why: the next edit retries.
-            Err(e) => self.error = Some(format!("cannot save settings: {e:#}")),
+            Ok(()) => {
+                self.saved = self.pending.clone();
+                Ok(())
+            }
+            Err(e) => Err(format!("cannot save settings: {e:#}")),
         }
     }
+}
+
+pub(crate) struct MixerApp {
+    shared: SharedMixerRef,
+    inputs: Vec<InputSource>,
+    outputs: Vec<String>,
+    add_index: Option<usize>, // selection in the "add input" combo
+    error: Option<String>,
+    timer: Option<ComponentTimer>,
+    eq_open: Option<StripId>,
+    eq_drag: Option<EqDrag>,
+    /// Repaint requests for the open EQ graph's Direct2D canvas (see `draw_eq_curve`).
+    eq_invalidator: Invalidator,
+    /// Window client width in DIPs; sizes the EQ band table (see `eq_table_width`).
+    window_w: f64,
+}
+
+impl MixerApp {
+    fn start(&mut self) {
+        if let Err(e) = self.shared.borrow_mut().mixer.start() {
+            self.error = Some(format!("{e:#}"));
+        }
+    }
+
+    /// Rebuild the streams after a structural change; a failed apply stays dirty in the `Mixer`.
+    fn apply(&mut self) {
+        if let Err(e) = self.shared.borrow_mut().mixer.apply() {
+            self.error = Some(format!("{e:#}"));
+        }
+    }
+
+    pub(crate) fn strip_params(&self, id: StripId) -> Option<Arc<Params>> {
+        self.shared
+            .borrow()
+            .mixer
+            .strip(id)
+            .map(|s| s.params.clone())
+    }
+
+    // ----- settings persistence: forwarded to SharedMixer -----
 
     pub(crate) fn bus_selection(&self, view: &MixerView, bus: usize) -> Option<usize> {
         match &view.buses[bus].device {
@@ -299,8 +398,12 @@ impl MixerApp {
     }
 
     fn captions(&self, view: &MixerView, context: &ViewContext<Self>) -> StackPanel {
+        let (active_strip, caption_strip) = {
+            let shared = self.shared.borrow();
+            (shared.caps.active_strip(), shared.caption_strip)
+        };
         let mut captions: Vec<View> = vec![];
-        match self.caps.active_strip() {
+        match active_strip {
             Some(_) => captions.push(
                 action_button(
                     "\u{ead8}",
@@ -320,7 +423,7 @@ impl MixerApp {
                     ComboBox::new()
                         .width(104.0)
                         .items_source(items)
-                        .selected_index(Some(self.caption_strip.unwrap_or(0)))
+                        .selected_index(Some(caption_strip.unwrap_or(0)))
                         .on_selection_changed(
                             context.callback(|index: Option<usize>| Message::CaptionStrip(index)),
                         )
@@ -346,85 +449,42 @@ impl MixerApp {
 }
 
 impl Component for MixerApp {
-    type Input = ();
+    // `SharedMixerInput` wraps `Rc<RefCell<SharedMixer>>` with pointer-equality for `PartialEq`.
+    type Input = SharedMixerInput;
     type Message = Message;
 
-    fn create(_input: &(), context: &ComponentContext<Self>) -> Self {
-        let mut mixer = Mixer::new();
+    fn create(input: &SharedMixerInput, context: &ComponentContext<Self>) -> Self {
+        // Wire up the completion slot so event/caption callbacks forward to this component.
         {
-            // Called from audio/error threads: queue a message and let the reactor wake the UI.
-            let completion = context.completion();
-            mixer.set_event_handler(Arc::new(move |e: &Event| {
-                let e = e.clone();
-                let completion = completion.clone();
-                _ = completion.complete_with(move || Message::Event(e));
-            }));
+            let shared = input.0.borrow();
+            *shared.completion_slot.lock().unwrap() = Some(context.completion());
         }
 
-        let config = Conf::load().expect("Failed to load config");
-
-        let whistle_cact = config
-            .settings
-            .model_root
-            .as_ref()
-            .map(|root| root.join("whistle.cact"))
-            .unwrap_or_else(|| PathBuf::from("whistle.cact"));
-
-        let caps = {
-            // Caption thread: same hand-off as above.
-            let completion = context.completion();
-
-            CaptionController::new(
-                PathBuf::from(whistle_cact),
-                PathBuf::from(&config.log),
-                None,
-                None,
-                Arc::new(move |c: &Caption| {
-                    let c = c.clone();
-                    let completion = completion.clone();
-                    _ = completion.complete_with(move || Message::Caption(c));
-                }),
-            )
+        // Start audio if this is the first window open (not already running).
+        let error = {
+            let mut shared = input.0.borrow_mut();
+            if !shared.mixer.is_running() {
+                match shared.mixer.start() {
+                    Ok(()) => shared.config.warning.clone(),
+                    Err(e) => Some(format!("{e:#}")),
+                }
+            } else {
+                None
+            }
         };
 
-        // Defaults: bus A = default output, default mic as strip 1 routed to bus B.
-        mixer.set_bus_device(0, default_output_name());
-        if let Some(name) = default_input_name() {
-            mixer.add_strip(
-                InputSource {
-                    name,
-                    loopback: false,
-                },
-                default_routes(false),
-            );
-        }
-
-        let mut app = Self {
-            mixer,
-            caps,
+        let app = Self {
+            shared: input.0.clone(),
             inputs: list_inputs(),
             outputs: list_outputs(),
-            caption_strip: None,
             add_index: None,
-            error: config.warning.clone(),
+            error,
             timer: Some(context.set_timeout(TICK, Message::Tick)),
             eq_open: None,
             eq_drag: None,
             eq_invalidator: Invalidator::new(),
             window_w: 940.0,
-            config,
-            latest_caption: Caption::default(),
-            pending: LiveStrips::new(),
-            saved: LiveStrips::new(),
-            save_at: None,
         };
-        // The default mic keeps its settings across runs; treat that as the state already on disk.
-        for id in app.mixer.strips().iter().map(|s| s.id) {
-            app.restore_strip(id);
-        }
-        app.pending = app.live_strips();
-        app.saved = app.pending.clone();
-        app.start();
         app
     }
 
@@ -433,8 +493,16 @@ impl Component for MixerApp {
             // No state change: the re-render triggered by this message is what moves the meters.
             // It is also the app's only heartbeat, so the debounced settings write rides along.
             Message::Tick => {
-                self.sync_settings(Instant::now());
-                self.timer = Some(context.set_timeout(TICK, Message::Tick));
+                if let Err(e) = self.shared.borrow_mut().sync_settings(Instant::now()) {
+                    self.error = Some(e);
+                }
+                // Only keep ticking while audio is running: meters need ~30 fps updates,
+                // but an idle app has nothing to repaint.
+                if self.shared.borrow().mixer.is_running() {
+                    self.timer = Some(context.set_timeout(TICK, Message::Tick));
+                } else {
+                    self.timer = None;
+                }
             }
             Message::Event(Event::Error(e)) => self.error = Some(e),
             // The engine drops looped routes and says so once; the alert bar below is derived from
@@ -442,15 +510,22 @@ impl Component for MixerApp {
             Message::Event(Event::Warning(_)) => {}
             Message::Event(Event::Started) => {}
             Message::Caption(c) => {
-                // Only the line being spoken right now is shown; the full transcript is written to
-                // `captions.log` by the controller.
-                self.latest_caption = c;
+                self.shared.borrow_mut().latest_caption = c;
             }
             Message::ToggleRun => {
-                if self.mixer.is_running() {
-                    self.mixer.stop();
+                let is_running = self.shared.borrow().mixer.is_running();
+                if is_running {
+                    self.shared.borrow_mut().mixer.stop();
+                    // The tick may never fire again: write any pending settings now.
+                    if let Err(e) = self.shared.borrow_mut().flush_settings() {
+                        self.error = Some(e);
+                    }
                 } else {
                     self.start();
+                    // Restart the meter tick if it was stopped while idle.
+                    if self.timer.is_none() {
+                        self.timer = Some(context.set_timeout(TICK, Message::Tick));
+                    }
                 }
             }
             Message::Refresh => {
@@ -459,64 +534,81 @@ impl Component for MixerApp {
             }
             Message::AddInput(index) => {
                 if let Some(src) = index.and_then(|i| self.inputs.get(i)).cloned() {
-                    let id = self
+                    let mut shared = self.shared.borrow_mut();
+                    let id = shared
                         .mixer
                         .add_strip(src.clone(), default_routes(src.loopback));
                     // A device that was configured in an earlier session comes back configured.
-                    self.restore_strip(id);
-                    self.pending = self.live_strips();
-                    self.apply();
+                    shared.restore_strip(id);
+                    shared.pending = shared.live_strips();
+                    if let Err(e) = shared.mixer.apply() {
+                        drop(shared);
+                        self.error = Some(format!("{e:#}"));
+                    }
                 }
                 self.add_index = None;
             }
             Message::RemoveStrip(id) => {
-                // Snapshot before dropping it: a fader moved less than a debounce ago would
-                // otherwise never reach the file, because the live map no longer has the strip.
-                // The entry stays in the file on purpose -- that is what makes the device come back
-                // configured when it is added again.
-                if let Some(strip) = self.mixer.strip(id) {
-                    let settings = Self::strip_settings(strip);
-                    if !settings.is_empty() {
-                        self.config
-                            .settings
-                            .set_strip(&strip.source.label(), settings);
+                {
+                    let mut shared = self.shared.borrow_mut();
+                    // Snapshot before dropping it: a fader moved less than a debounce ago would
+                    // otherwise never reach the file, because the live map no longer has the strip.
+                    // The entry stays in the file on purpose -- that is what makes the device come
+                    // back configured when it is added again.
+                    if let Some(strip) = shared.mixer.strip(id) {
+                        let settings = SharedMixer::strip_settings(strip);
+                        let label = strip.source.label();
+                        if !settings.is_empty() {
+                            shared.config.settings.set_strip(&label, settings);
+                        }
+                    }
+                    shared.mixer.remove_strip(id);
+                    shared.pending = shared.live_strips();
+                    if let Err(e) = shared.mixer.apply() {
+                        drop(shared);
+                        self.error = Some(format!("{e:#}"));
                     }
                 }
-                self.mixer.remove_strip(id);
                 if self.eq_open == Some(id) {
                     self.eq_open = None;
                     self.eq_drag = None;
                 }
                 self.eq_invalidator.invalidate();
                 // Losing the label makes `pending` differ from `saved`, which schedules the write.
-                self.pending = self.live_strips();
-                self.apply();
             }
             Message::SetBus(bus, Some(index)) => {
                 let device = index
                     .checked_sub(1)
                     .and_then(|i| self.outputs.get(i))
                     .cloned();
-                self.mixer.set_bus_device(bus, device);
+                self.shared.borrow_mut().mixer.set_bus_device(bus, device);
                 self.apply();
             }
             Message::SetBus(_, None) => {}
-            Message::CaptionStrip(Some(0)) => self.caption_strip = None,
-            Message::CaptionStrip(Some(n)) => self.caption_strip = Some(n),
+            Message::CaptionStrip(Some(0)) => self.shared.borrow_mut().caption_strip = None,
+            Message::CaptionStrip(Some(n)) => self.shared.borrow_mut().caption_strip = Some(n),
             Message::CaptionStrip(None) => {}
             Message::CaptionsOn => {
-                if self.config.settings.model_root.is_none() {
-                    self.error = Some(format!(
-                        "no \"model_root\" in {}: add the folder that holds whistle.cact",
-                        self.config.settings_path().display()
-                    ));
-                } else if let Err(e) = self.caps.on(&self.mixer, self.caption_strip) {
-                    // First use loads the model, so this can block the UI for a moment.
-                    self.error = Some(format!("{e:#}"));
+                let result = {
+                    let mut shared = self.shared.borrow_mut();
+                    if shared.config.settings.model_root.is_none() {
+                        Err(format!(
+                            "no \"model_root\" in {}: add the folder that holds whistle.cact",
+                            shared.config.settings_path().display()
+                        ))
+                    } else {
+                        let s = &mut *shared;
+                        s.caps
+                            .on(&s.mixer, s.caption_strip)
+                            .map_err(|e| format!("{e:#}"))
+                    }
+                };
+                if let Err(e) = result {
+                    self.error = Some(e);
                 }
             }
             Message::CaptionsOff => {
-                self.caps.off();
+                self.shared.borrow_mut().caps.off();
             }
             Message::DismissError => self.error = None,
             Message::WindowWidth(width) => self.window_w = width,
@@ -552,11 +644,17 @@ impl Component for MixerApp {
                 self.eq_add_default(strip);
                 self.eq_invalidator.invalidate();
             }
+            Message::MinimizeToTray => {
+                let _ = context.close_window();
+            }
         }
     }
 
-    fn view(&self, _input: &(), context: &mut ViewContext<Self>) -> View {
-        let view = self.mixer.snapshot();
+    fn view(&self, _input: &SharedMixerInput, context: &mut ViewContext<Self>) -> View {
+        let (view, icon) = {
+            let shared = self.shared.borrow();
+            (shared.mixer.snapshot(), shared.config.icon.clone())
+        };
 
         context.window_title("RustMeeter");
         // The EQ table sizes its columns from the client width, so track resizes.
@@ -564,7 +662,7 @@ impl Component for MixerApp {
             .on_window_size(context.callback(|size: WindowSize| Message::WindowWidth(size.width)));
         context.window_visuals(
             WindowVisuals::new()
-                .icon(self.config.icon.clone())
+                .icon(icon)
                 .theme(WindowTheme::Dark)
                 .backdrop(WindowBackdrop::Acrylic)
                 .client_size(800.0, 660.0)
@@ -665,6 +763,6 @@ impl Drop for MixerApp {
     /// Closing the window a moment after a change must not lose it: the debounce timer will never
     /// fire again.
     fn drop(&mut self) {
-        self.flush_settings();
+        let _ = self.shared.borrow_mut().flush_settings();
     }
 }

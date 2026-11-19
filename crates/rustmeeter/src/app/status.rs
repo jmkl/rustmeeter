@@ -37,7 +37,7 @@ const HINT_MODEL: &str =
 
 /// Colour of the caption dot. Blue = open and quiet, green = voice detected, amber = the model is
 /// busy (the "processing with Whisper" state to look for while a line is being turned into text).
-fn state_color(state: CaptionState) -> Color {
+pub(super) fn state_color(state: CaptionState) -> Color {
     match state {
         CaptionState::Transcribing => AMBER,
         CaptionState::Speech => GREEN,
@@ -68,7 +68,10 @@ fn clip(text: &str, max: usize) -> String {
 
 impl MixerApp {
     pub(crate) fn status_bar(&self, view: &MixerView) -> View {
-        let status = self.caps.status();
+        let (status, active_strip_num) = {
+            let shared = self.shared.borrow();
+            (shared.caps.status(), shared.caps.active_strip())
+        };
         let state = status.as_ref().map(|s| s.state());
 
         // Left: the audio engine. A stopped engine explains a silent graph without guessing.
@@ -85,17 +88,7 @@ impl MixerApp {
             None => (DIM, "captions off"),
         };
 
-        let mut caption_cell: Vec<View> = vec![
-            dot(color).into(),
-            TextBlock::new()
-                .text(label)
-                .font_size(10.5)
-                .font_weight(FontWeight::SEMI_BOLD)
-                .foreground(Brush::Solid(if state.is_some() { TEXT } else { DIM }))
-                .vertical_alignment(VerticalAlignment::Center)
-                .tooltip(state_hint(state))
-                .into(),
-        ];
+        let mut caption_cell: Vec<View> = vec![];
 
         // The graph only exists while the tap is open: next to "captions off" an empty well reads
         // as a progress bar stuck at zero.
@@ -107,6 +100,17 @@ impl MixerApp {
                     .into(),
             );
         }
+        caption_cell.push(dot(color).into());
+        caption_cell.push(
+            TextBlock::new()
+                .text(label)
+                .font_size(10.5)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .foreground(Brush::Solid(if state.is_some() { TEXT } else { DIM }))
+                .vertical_alignment(VerticalAlignment::Center)
+                .tooltip(state_hint(state))
+                .into(),
+        );
 
         let caption_state = StackPanel::new()
             .orientation(Orientation::Horizontal)
@@ -116,7 +120,7 @@ impl MixerApp {
 
         // Right: what the model produced, or why it failed.
         let mut tail: Vec<View> = vec![];
-        if let Some(n) = self.caps.active_strip() {
+        if let Some(n) = active_strip_num {
             let strip = view
                 .strips
                 .get(n.saturating_sub(1))

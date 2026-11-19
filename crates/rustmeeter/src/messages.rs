@@ -19,6 +19,8 @@ pub(crate) enum Message {
     DismissError,
     /// Client width in DIPs, so the EQ table can size its columns to the window.
     WindowWidth(f64),
+    /// Minimize/hide window to system tray.
+    MinimizeToTray,
     // Parametric EQ editor.
     ToggleEq(StripId),
     EqPress {

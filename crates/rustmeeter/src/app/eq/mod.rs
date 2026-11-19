@@ -399,7 +399,6 @@ pub(crate) fn eq_button(eq: &EqSettings, open: bool, click: impl IntoUnitCallbac
         .style(ButtonStyle::Subtle)
         .background(Brush::Solid(if open { BLUE } else { FILL_OFF }))
         .horizontal_alignment(HorizontalAlignment::Stretch)
-
         .height(24.0)
         .content(
             TextBlock::new()

@@ -8,7 +8,7 @@
 use rustmeeter_core::{MAX_DB, MIN_DB};
 use windows_reactor::*;
 
-use crate::theme::{CAP, CAP_EDGE, DIM, GREEN,  TRACK_BG, vmeter};
+use crate::theme::{CAP, CAP_EDGE, DIM, GREEN, TRACK_BG, vmeter};
 
 /// Height shared by the groove, the scale and the meter.
 // pub(crate) const fader_h: f64 = 150.0;

@@ -9,7 +9,7 @@ use crate::captions::{Caption, CaptionLogger, CaptionStatus, SharedTranscriber};
 use crate::mixer::Mixer;
 use anyhow::{Result, anyhow, bail};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Called on the caption thread for every transcribed utterance.
 pub type CaptionCallback = Arc<dyn Fn(&Caption) + Send + Sync>;
@@ -23,6 +23,9 @@ pub struct CaptionController {
     asr: Option<SharedTranscriber>,
     logger: Option<CaptionLogger>,
     strip: Option<usize>,
+    /// Last line transcribed, kept here rather than in the frontend: a UI that is closed (or that
+    /// never registered a callback slot) must still be able to show what was just said.
+    latest: Arc<Mutex<Option<Caption>>>,
 }
 
 impl CaptionController {
@@ -33,6 +36,15 @@ impl CaptionController {
         threads: Option<u32>,
         on_caption: CaptionCallback,
     ) -> Self {
+        let latest: Arc<Mutex<Option<Caption>>> = Arc::new(Mutex::new(None));
+        let stash = latest.clone();
+        let frontend = on_caption;
+        let on_caption: CaptionCallback = Arc::new(move |c: &Caption| {
+            if let Ok(mut slot) = stash.lock() {
+                *slot = Some(c.clone());
+            }
+            frontend(c);
+        });
         Self {
             model,
             log,
@@ -42,6 +54,7 @@ impl CaptionController {
             asr: None,
             logger: None,
             strip: None,
+            latest,
         }
     }
 
@@ -100,6 +113,10 @@ impl CaptionController {
         )?;
         self.logger = Some(logger);
         self.strip = Some(idx + 1);
+        // A new session starts with a blank line, not with whatever was said last time.
+        if let Ok(mut slot) = self.latest.lock() {
+            *slot = None;
+        }
         Ok(idx + 1)
     }
 
@@ -117,6 +134,11 @@ impl CaptionController {
     /// Live state of the running session, for a UI to poll each frame.
     pub fn status(&self) -> Option<Arc<CaptionStatus>> {
         self.logger.as_ref().map(|l| l.status())
+    }
+
+    /// Last line the transcriber produced, whether or not a frontend was listening at the time.
+    pub fn latest(&self) -> Option<Caption> {
+        self.latest.lock().ok().and_then(|slot| slot.clone())
     }
 
     pub fn model_loaded(&self) -> bool {

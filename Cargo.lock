@@ -795,6 +795,7 @@ dependencies = [
  "serde",
  "serde_json",
  "windows-canvas",
+ "windows-core 0.101.0",
  "windows-reactor",
  "windows-text",
  "winres",
@@ -1203,8 +1204,8 @@ version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
 dependencies = [
- "windows-implement",
- "windows-interface",
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
  "windows-link 0.2.1",
  "windows-result 0.4.1",
  "windows-strings 0.5.1",
@@ -1214,6 +1215,8 @@ dependencies = [
 name = "windows-core"
 version = "0.101.0"
 dependencies = [
+ "windows-implement 0.101.0",
+ "windows-interface 0.101.0",
  "windows-link 0.100.1",
  "windows-result 0.100.1",
  "windows-strings 0.100.1",
@@ -1239,10 +1242,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-implement"
+version = "0.101.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "windows-interface"
 version = "0.59.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "windows-interface"
+version = "0.101.0"
 dependencies = [
  "proc-macro2",
  "quote",

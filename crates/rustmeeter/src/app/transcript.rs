@@ -7,7 +7,8 @@ use crate::theme::*;
 
 impl MixerApp {
     pub(crate) fn transcript(&self) -> View {
-        let latest = self.latest_caption.text.trim();
+        let caption_text = self.shared.borrow().latest_caption.text.clone();
+        let latest = caption_text.trim();
         let empty = latest.is_empty();
 
         // One caption, as large as the panel allows. Past lines are not shown here: they are in

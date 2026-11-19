@@ -31,7 +31,7 @@ def main [ arg?:string] {
                 "crates",
                 "task.nu",
                 "src"]
-          7z a -tzip ($name)_automatools.zip ...$files -xr!*.cact
+          7z a -tzip ($name)_automatools.zip ...$files -xr!*.cact -xr!*.a
     }
 
       _         => { print $help }
