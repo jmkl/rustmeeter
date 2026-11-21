@@ -19,7 +19,7 @@ def main [ arg?:string] {
       ^cargo build --release
     }
     "run"       => {
-       ^target\x86_64-pc-windows-gnullvm\release\rustmeeter.exe run --bus-a "Speakers (Realtek(R) Audio)" --bus-b "CABLE Input" --mic "Headset Microphone (MH752)" --loopback default --captions captions.log --whistle .\cactus\whistle.cact
+       ^target\x86_64-pc-windows-gnullvm\release\rsmtr.exe run --bus-a "Speakers (Realtek(R) Audio)" --bus-b "CABLE Input" --mic "Headset Microphone (MH752)" --loopback default --captions captions.log --whistle .\cactus\whistle.cact
     }
     "zip"       => {
           let name = date now | format date "%d-%m-%Y_%H%M%S"

@@ -2,6 +2,8 @@
 
 use windows_reactor::*;
 
+use crate::{component::button::{AcButton, AcButtonInput, Side}, util::{dim_color, shift_hue}};
+
 // Palette. The window is dark acrylic, so cards are translucent white on purpose: they pick up
 // the backdrop instead of painting over it.
 pub(crate) const CARD: Color = Color::argb(0x14, 0xFF, 0xFF, 0xFF);
@@ -116,27 +118,27 @@ pub(crate) fn in_column(child: impl Into<View>, column: i32) -> Border {
     Border::new().grid_column(column).content(child)
 }
 
-/// Filled button: transport and caption actions. Local background wins over the style, so the
-/// color is stable (Subtle style keeps the flat look and rounded corners).
+
 pub(crate) fn action_button(
     text: &str,
     bg: Color,
     fg: Color,
+    side:Side,
     click: impl IntoUnitCallback,
-) -> Button {
-    Button::new()
-        .style(ButtonStyle::Subtle)
-        .background(Brush::Solid(bg))
-        .height(30.0)
-        .min_width(30.0)
-        .content(
-            FontIcon::new()
-                .glyph(text)
-                .font_size(11.5)
-                .foreground(Brush::Solid(fg)),
-        )
-        .on_click(click)
+) -> View{
+  View::component::<AcButton>(AcButtonInput{
+    glyph: text.into(),
+    hover_bg: dim_color(bg, 0.5),
+    bg,
+    pressed_bg: shift_hue(bg, 15.),
+    fg,
+    on_click: click.into_unit_callback(),
+    side,
+})
+
 }
+
+
 
 /// Small square toggle. The button's own padding would clip a single glyph, so the label is
 /// pulled outward with a negative margin (WinUI buttons do not clip their content).

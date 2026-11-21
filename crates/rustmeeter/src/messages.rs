@@ -2,12 +2,19 @@
 
 use rustmeeter_core::*;
 
+use crate::toolcall::ToolCallReport;
+
 /// Messages sent to the UI thread: user actions, async events and the meter tick.
 #[derive(Clone)]
 pub(crate) enum Message {
+    ToggleTitleBar,
     Tick,
     Event(Event),
     Caption(Caption),
+    /// Result of the Needle toolcall worker for one caption line.
+    ToolCall(ToolCallReport),
+    /// Title-bar checkbox for Needle tool calling.
+    SetToolCall(bool),
     ToggleRun,
     Refresh,
     AddInput(Option<usize>),

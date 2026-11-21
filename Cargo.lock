@@ -791,6 +791,8 @@ name = "rustmeeter"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "regex",
  "rustmeeter-core",
  "serde",
  "serde_json",

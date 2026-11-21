@@ -21,14 +21,16 @@
 //! - [`messages`]   messages posted to the UI thread//! - [`fader`]      custom channel fader (dB scale, groove, cap) plus its level meter
 //! - [`hslider`]    compact horizontal slider used by bus faders and the EQ table
 //! - [`theme`]      palette and reusable view builders
+//! - [`toolcall`]   Needle 3 tool calling for finished caption lines
 //! - [`util`]       small display/domain helpers
-
+mod component;
 mod app;
 mod config;
 mod fader;
 mod hslider;
 mod messages;
 mod theme;
+mod toolcall;
 mod util;
 
 use std::path::PathBuf;
@@ -62,7 +64,7 @@ impl Application for RustMeeterApp {
         let shared = app::SharedMixer::new();
         let icon_path = PathBuf::from(shared.borrow().config.icon.clone());
         context.show_window("main");
-        context.show_window("caption"); // TEMP debug
+        // context.show_window("caption"); // TEMP debug
         Self { shared, icon_path }
     }
 
@@ -94,25 +96,16 @@ impl Application for RustMeeterApp {
         let menu_cb = context.callback(|key: Key| {
             if key == Key::from("quit") {
                 AppAction::Quit
-            } else if key == Key::from("caption") {
-                AppAction::Caption
-            } else if key == Key::from("caption_window") {
+            }  else if key == Key::from("caption_window") {
                 AppAction::CaptionWindow
             } else {
                 AppAction::Show
             }
         });
-        // Read the live state rather than tracking it: any of the windows can toggle captions.
-        let caption = if self.shared.borrow().caps.active_strip().is_some() {
-            "Stop Caption"
-        } else {
-            "Start Caption"
-        };
+
 
         let menu = Menu::new(
             [
-                MenuItem::item("caption", Rc::from(caption)),
-                MenuItem::separator("sep2"),
                 MenuItem::item("caption_window", Rc::from("Caption Window")),
                 MenuItem::item("show", Rc::from("Show RustMeeter")),
                 MenuItem::separator("sep"),

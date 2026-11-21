@@ -341,6 +341,7 @@ impl MixerApp {
                     "\u{e710}",
                     BLUE,
                     INK,
+                    crate::component::button::Side::None,
                     context.callback(move |()| Message::EqAdd(id)),
                 ),
                 Button::new()

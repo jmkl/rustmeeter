@@ -1,0 +1,112 @@
+# AGENTS.md
+
+Guidance for agents working in this workspace. Background and architecture: [`DOCS.md`](DOCS.md).
+User-facing setup/usage: [`README.md`](README.md).
+
+## What this is
+
+A Windows Voicemeeter-style mixer in Rust (`rustmeeter-core`) with a CLI and a WinUI 3 GUI over it,
+plus Cactus model glue (`cactus-core`: Whistle speech → live captions, Needle 3 text → tool calls)
+and a Whistle fine-tuning recorder.
+
+## First, check the state of the tree
+
+This repo is frequently mid-refactor. Before editing:
+
+```
+git status --short
+git log --oneline -5
+```
+
+Recent sessions have left untracked new modules and deleted docs; do not assume `HEAD` matches
+what is on disk, and do not "restore" deleted files without asking.
+
+## Layout (where things live)
+
+| Path | Role |
+|---|---|
+| `crates/rustmeeter-core/src/` | The library. Only this crate contains audio/engine code. |
+| `.../mixer.rs` | `Mixer` high-level API + `MixerView`/`StripView`/`BusView`, feedback detection. |
+| `.../params.rs` | Lock-free `Params` (gain/mute/EQ/routes/meter) shared with audio threads. |
+| `.../engine.rs` | Internal cpal streams, resampling, EQ biquads, bus mixing. |
+| `.../eq.rs` | EQ model, coefficient design, response curve. |
+| `.../tap.rs`, `vad.rs`, `captions.rs`, `caption_controller.rs` | Caption pipeline. |
+| `.../devices.rs` | Device discovery and cable-name matching. |
+| `crates/cactus-core/src/lib.rs` | FFI to `libcactus.a`; `Cactus`, `Whistle`, `Agent`, `Mirage`. |
+| `crates/rustmeeter/src/` | GUI only; no audio code. `app/mod.rs` holds `SharedMixer` and persistence. |
+| `crates/rustmeeter-cli/src/main.rs` | CLI + REPL. |
+| `crates/recorder/src/main.rs` | Dataset recorder. |
+
+Frontends must use only the public `rustmeeter_core` API. Never put engine logic in the GUI/CLI.
+
+## Build & test
+
+Target is pinned to `x86_64-pc-windows-gnullvm` in `.cargo/config.toml` (llvm-mingw linker), and
+`cactus-core/build.rs` requires `cactus/libcactus.a`. Without it the build panics; override with
+`CACTUS_LIB_DIR` / `LLVM_MINGW_DIR` / `CACTUS_CXX_LIB`.
+
+**Always address binaries by package** — the GUI (`rustmeeter`) and CLI (`rustmeeter-cli`) both
+emit a binary named `rustmeeter` and overwrite each other in `target/<triple>/release/`:
+
+```
+cargo build --release -p rustmeeter-cli
+cargo run --release -p rustmeeter-cli -- list
+cargo build --release -p rustmeeter
+cargo test  -p rustmeeter-core        # unit tests, needs libcactus.a
+```
+
+`cargo test -p rustmeeter-core` covers device naming, EQ responses, params sanitising, feedback
+detection, config round-trips. Add unit tests next to the code you change (this codebase does that
+consistently). There are no integration tests that need real audio devices.
+
+The GUI depends on the sibling checkout `E:\_CODE\rust\windows-rs` via path dependencies; a fresh
+clone of only this repo will not build `-p rustmeeter`.
+
+## Non-negotiable invariants
+
+- **Keep `Mixer` on one thread.** It owns cpal streams and is not `Send`-safe by convention. The
+  GUI keeps it on the UI thread inside `Rc<RefCell<SharedMixer>>`; the CLI keeps it on `main`.
+- **`Params` stays lock-free for live controls.** Gain/mute/routes/level are atomics. EQ is an
+  immutable `Arc<EqSettings>` swapped under a mutex and published through `eq_version`; the audio
+  thread uses `try_eq()` and retries next buffer rather than blocking.
+- **Structural changes go through `apply()`.** `add_strip`/`remove_strip`/`set_bus_device` mark
+  dirty; never rebuild streams implicitly. A rebuild restarts audio (audible glitch) — that is why
+  faders/routing/EQ must not require it.
+- **Never block an audio callback.** Tap reads, level writes and event handlers are kept short;
+  `EventHandler` runs on arbitrary threads.
+- **Serialize Cactus access.** One process-global conversation. Use
+  `rustmeeter_core::cactus_call_lock()` around any `Whistle`/`Agent` call, and do not load models
+  twice (the wrapper guards by path already).
+- **Captions read a tap, not the mix.** Pre-fader/pre-mute/pre-EQ by design; routing does not
+  affect transcription.
+- **No IPC.** Do not add sockets/pipes "for now" without discussing; cross-process surfaces today
+  are files only.
+
+## Conventions
+
+- Rust edition 2024, `anyhow::Result` in fallible code, `bail!`/`Context` for errors.
+- GUI views are built with `windows_reactor` builders; reusable pieces go in `theme.rs`
+  (`card`, `chip`, `badge`, `caption`, `spark`, `vmeter`), not inline.
+- Messages flow to components as enums (`Message`, `CaptionWindow::Msg`); async work reports back
+  through callbacks/channels and posts a message, never touches component state directly.
+- Settings keys are **device labels**, not strip indices. Omitted fields mean defaults; empty
+  entries are removed. Writes are debounced (~600 ms) and atomic (tmp + rename).
+- Comments in this codebase explain *why*, at length, and often record a rejected alternative.
+  Match that style; do not delete explanatory comments.
+- Tool schemas live in `%APPDATA%\rustmeeter\config.json`; implementations live in
+  `src/toolcall/tools.rs` and must be registered in `register()`. Triggers are case-insensitive
+  regexes; no triggers means every caption is sent (avoid that in practice).
+
+## Adding a Needle tool (the usual task)
+
+1. Add a `Tool` impl in `crates/rustmeeter/src/toolcall/tools.rs` and register its name in
+   `register()`.
+2. Declare the same name plus schema (and `triggers`) under `"tools"` in `config.json`.
+3. Remember the worker resets the conversation per caption; keep tools stateless across calls.
+4. Check `toolcall.log` (next to `captions.log`) for the decision trace.
+
+## Gotchas
+- Feedback loops (`[Loopback] X` routed into a bus playing on X, or `CABLE Output` into
+  `CABLE Input`) are dropped by the engine; surface them in the UI rather than silently muting.
+- `recorder` writes relative `finetune\*.jsonl` paths — run it from the repository root.
+- Model/`.cact`/`.a`/`finetune`/zip files are gitignored; do not commit them.

@@ -3,10 +3,23 @@
 
 #[cfg(feature = "cactus")]
 use cactus_core as cactus;
+use std::sync::{Mutex, MutexGuard};
+
+/// Serializes calls into the process-global Cactus runtime.
+///
+/// Cactus has one conversation shared by every model facade, so caption transcription and Needle
+/// tool calling must not overlap. The frontend takes this lock around its `Agent` calls; the
+/// `Transcriber` implementation below takes it around speech transcription.
+static CACTUS_CALL_LOCK: Mutex<()> = Mutex::new(());
+
+pub fn cactus_call_lock() -> MutexGuard<'static, ()> {
+    CACTUS_CALL_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[cfg(feature = "cactus")]
 impl captions::Transcriber for cactus::Whistle {
     fn transcribe(&mut self, pcm16k: &[i16]) -> anyhow::Result<String> {
+        let _guard = cactus_call_lock();
         cactus::Transcriber::transcribe(self, pcm16k)
     }
 }

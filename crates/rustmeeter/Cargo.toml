@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 rustmeeter-core = { path = "../rustmeeter-core", features = ["serde"] }
 anyhow = "1"
+chrono = "0.4"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 windows-canvas = { path = "../../../windows-rs/crates/libs/canvas", default-features = false, features = ["reactor"] }

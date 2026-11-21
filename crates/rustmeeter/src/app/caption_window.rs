@@ -41,6 +41,10 @@ const MIC_D: f64 = 58.0;
 const BAR_W: f64 = 4.0;
 const BAR_GAP: f64 = 4.0;
 
+const TICK: Duration = Duration::from_millis(33);
+/// While captions are off nothing moves on its own, but the window still has to notice a start
+/// from the mixer or the tray. A slow poll does that without keeping a 30 Hz repaint loop alive.
+const IDLE_TICK: Duration = Duration::from_millis(250);
 const HINT_IDLE: &str = "Incoming caption goes here\u{2026}";
 const HINT_OFF: &str = "Press the mic to start captioning.";
 const HINT_STOPPED: &str = "Audio is stopped \u{2014} start the mixer to hear anything.";
@@ -65,6 +69,7 @@ pub(crate) enum Msg {
     Toggle,
     /// Index in the strip combo: 0 = "first mic", n = strip n.
     PickStrip(Option<usize>),
+    Tick,
     /// Client width in DIPs, so the waveform fills the bar at any window size.
     Width(f64),
     /// Close button on the title bar.
@@ -75,6 +80,7 @@ pub(crate) struct CaptionWindow {
     shared: SharedMixerRef,
     toggle: Callback<()>,
     width: f64,
+    timer: Option<ComponentTimer>,
     title_visible: bool,
 }
 
@@ -135,14 +141,29 @@ impl Component for CaptionWindow {
             shared: input.shared.clone(),
             toggle: input.toggle.clone(),
             width: 620.0,
+            timer: Some(context.set_timeout(TICK, Msg::Tick)),
             title_visible: false,
         }
     }
 
     fn update(&mut self, message: Msg, context: &ComponentContext<Self>) {
         match message {
+            // Keep ticking for as long as the window exists, even while captions are off. This
+            // window does not receive the mixer's messages, and captions can be started from the
+            // mixer or the tray as well as from the mic button here; stopping the timer entirely
+            // would leave the waveform and the pill frozen forever after such a toggle. Idle polls
+            // are slow enough to be free, and go back to full speed once a start is seen.
+            Msg::Tick => {
+                let active = self.shared.borrow().caps.active_strip().is_some();
+                let delay = if active { TICK } else { IDLE_TICK };
+                self.timer = Some(context.set_timeout(delay, Msg::Tick));
+            }
             // The re-render this triggers is the whole point: it repaints the waveform and the pill.
-            Msg::Toggle => self.toggle.call(()),
+            Msg::Toggle => {
+                // Leave the idle poll immediately; the root toggles captions on this message.
+                self.timer = Some(context.set_timeout(TICK, Msg::Tick));
+                self.toggle.call(());
+            }
             Msg::PickStrip(index) => {
                 // 1-based; `None` means "the first mic".
                 self.shared.borrow_mut().caption_strip = index.filter(|n| *n > 0);
@@ -266,6 +287,8 @@ impl Component for CaptionWindow {
         // A real circle. `Button` only has a template corner radius (`ControlCornerRadius`) and
         // overriding that resource trips a runtime error in the adapter, so the circle is a
         // `Border` with a pointer handler: same click, exact shape, no template involved.
+        //
+
         let mic = Border::new()
             .width(MIC_D)
             .height(MIC_D)
@@ -324,7 +347,6 @@ impl Component for CaptionWindow {
             )
             .into();
 
-
         let drag = Border::new().background(Brush::Solid(Color::transparent()));
         let close = Button::new()
             .style(ButtonStyle::Subtle)
@@ -364,13 +386,8 @@ impl Component for CaptionWindow {
             .content(TitleBar::new().preferred_height(WindowTitleBarHeight::Collapsed));
 
         Grid::new()
-            .rows([ GridLength::STAR])
-            .children((
-                no_title,
-                card,
-                sensor
-
-            ))
+            .rows([GridLength::STAR])
+            .children((no_title, card, sensor))
             .into()
     }
 }

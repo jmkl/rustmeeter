@@ -8,5 +8,5 @@ rustmeeter-core = { path = "../rustmeeter-core" }
 anyhow = "1"
 
 [[bin]]
-name = "rustmeeter"
+name = "rsmtr"
 path = "src/main.rs"
