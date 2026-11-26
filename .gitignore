@@ -5,3 +5,5 @@ cactus/*.cact
 *.zip
 zip_files/
 finetune/
+Output/
+.mypy_cache/

@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! RustMeeter GUI (windows-reactor / WinUI 3).
 //!
 //! A thin frontend: no audio code here, only the public library API
@@ -26,8 +27,8 @@
 //! - [`hslider`]    compact horizontal slider used by bus faders and the EQ table
 //! - [`theme`]      palette and reusable view builders
 //! - [`util`]       small display/domain helpers
-mod component;
 mod app;
+mod component;
 mod fader;
 mod hslider;
 mod messages;
@@ -67,7 +68,9 @@ impl Application for RustMeeterApp {
             let shared = shared.borrow();
             let path = PathBuf::from(&shared.config.icon);
             if !path.exists() {
-                let _ = shared.config.write_icon(include_bytes!("../assets/app.ico"));
+                let _ = shared
+                    .config
+                    .write_icon(include_bytes!("../assets/app.ico"));
             }
             path
         };
@@ -104,13 +107,12 @@ impl Application for RustMeeterApp {
         let menu_cb = context.callback(|key: Key| {
             if key == Key::from("quit") {
                 AppAction::Quit
-            }  else if key == Key::from("caption_window") {
+            } else if key == Key::from("caption_window") {
                 AppAction::CaptionWindow
             } else {
                 AppAction::Show
             }
         });
-
 
         let menu = Menu::new(
             [

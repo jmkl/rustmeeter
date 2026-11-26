@@ -439,12 +439,15 @@ impl Component for MixerApp {
                 if config_file.exists() {
                     if let Some(file) = config_file.to_str() {
                         use std::os::windows::process::CommandExt;
-                        std::process::Command::new("powershell.exe")
+                        if let Err(err) = std::process::Command::new("powershell.exe")
                             .arg("-NoProfile")
                             .arg("-Command")
                             .arg(file)
                             .creation_flags(0x08000000)
-                            .output();
+                            .output()
+                        {
+                            eprintln!("Error opening config.json : {err}");
+                        }
                     }
                 }
             }
