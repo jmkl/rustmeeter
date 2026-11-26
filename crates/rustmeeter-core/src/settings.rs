@@ -1,7 +1,9 @@
 //! The settings file: `%APPDATA%\rustmeeter\config.json`.
 //!
-//! Everything the GUI remembers between runs lives in one JSON document, so it can be read, diffed
-//! and edited by hand. The shape is a flat map of sections. Per-strip data is keyed by the strip's
+//! This lives in the core crate, not in the GUI: the CLI, the IPC server and any future frontend
+//! share the same on-disk format and the same migration rules. Everything a frontend remembers
+//! between runs lives in one JSON document, so it can be read, diffed and edited by hand. The shape
+//! is a flat map of sections. Per-strip data is keyed by the strip's
 //! source label (`InputSource::label()`), which is the device name the user sees, prefixed with
 //! `[Loopback] ` for output taps. Keying by device name rather than by strip index is deliberate:
 //! strips are added and removed in any order, and settings belong to the *device*, not to slot 2.
@@ -54,7 +56,7 @@
 //! ```
 //!
 //! `tools` is passed to Needle 3 as its tool schema. A schema alone does not execute anything: the
-//! matching handler must be registered under `src/toolcall/tools.rs`.
+//! matching handler must be registered under `crates/rustmeeter-core/src/toolcall/tools.rs`.
 //!
 //! Every caption is an independent turn: the worker resets Needle's conversation before each
 //! completion. If any tool declares `triggers`, those regexes also gate the request, so a caption
@@ -64,16 +66,15 @@
 //! Older builds used a `key = value` file called `config`; it is read once to carry `model_root`
 //! over, then left alone.
 
+use crate::{EqSettings, InputSource, MAX_DB, MIN_DB, NUM_BUSES};
 use anyhow::{Context, Result};
-use rustmeeter_core::{EqSettings, InputSource, MAX_DB, MIN_DB, NUM_BUSES};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-const APP_ICON: &[u8] = include_bytes!("../assets/app.ico");
 /// The settings document. JSON because it is meant to be read and edited by humans.
-const SETTINGS_FILE: &str = "config.json";
+pub const SETTINGS_FILE: &str = "config.json";
 /// The pre-JSON `key = value` file, read once for migration.
 const LEGACY_FILE: &str = "config";
 
@@ -207,6 +208,8 @@ pub struct Conf {
     pub settings: Settings,
     pub root: PathBuf,
     pub log: PathBuf,
+    /// Where a frontend may keep its window/tray icon. The core does not know what an icon looks
+    /// like; [`Conf::write_icon`] writes whatever bytes the frontend hands it.
     pub icon: String,
     /// Something the user should know about the file itself: unreadable settings were moved
     /// aside, an unparsable `model_root`, ... `None` on a clean load.
@@ -214,14 +217,16 @@ pub struct Conf {
 }
 
 impl Conf {
-    /// Read the settings file, creating it on first run. An unreadable file never stops the app
-    /// from starting: it is moved aside and the defaults are used.
+    /// Read the settings file in the user's config directory, creating it on first run. An
+    /// unreadable file never stops the app from starting: it is moved aside and defaults are used.
     pub fn load() -> Result<Self> {
-        let root = app_config_dir()?;
+        Self::load_from(app_config_dir()?)
+    }
+
+    /// Same as [`Conf::load`], but for an explicit directory (tests, portable installs).
+    pub fn load_from(root: PathBuf) -> Result<Self> {
+        std::fs::create_dir_all(&root)?;
         let icon = root.join("app.ico");
-        if !icon.exists() {
-            std::fs::write(&icon, APP_ICON)?;
-        }
         let caption_log = root.join("captions.log");
         _ = OpenOptions::new()
             .write(true)
@@ -275,7 +280,7 @@ impl Conf {
     }
 
     /// Add a note for the user without losing an earlier one.
-    pub(crate) fn warn(&mut self, message: String) {
+    pub fn warn(&mut self, message: String) {
         self.warning = Some(match self.warning.take() {
             Some(previous) => format!("{previous}; {message}"),
             None => message,
@@ -285,6 +290,13 @@ impl Conf {
     /// Where the settings live, for messages.
     pub fn settings_path(&self) -> PathBuf {
         self.root.join(SETTINGS_FILE)
+    }
+
+    /// Write the frontend's icon next to the settings file (GUI/tray frontends only).
+    pub fn write_icon(&self, bytes: &[u8]) -> Result<()> {
+        let path = self.root.join("app.ico");
+        std::fs::write(&path, bytes)
+            .with_context(|| format!("cannot write icon to {}", path.display()))
     }
 
     /// Write the settings atomically: a crash mid-write leaves the old file intact.
@@ -332,7 +344,7 @@ fn legacy_model_root(path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustmeeter_core::{EQ_FREQ_MAX, EQ_GAIN_MAX, EQ_Q_MIN, EqBand, EqKind};
+    use crate::{EQ_FREQ_MAX, EQ_GAIN_MAX, EQ_Q_MIN, EqBand, EqKind};
 
     fn shaped() -> EqSettings {
         let mut eq = EqSettings::default();

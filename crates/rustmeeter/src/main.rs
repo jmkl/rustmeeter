@@ -14,23 +14,24 @@
 //! Audio-thread callbacks reach the UI through a `ComponentCompletion` stored in the shared state;
 //! the slot is updated each time a window component is created.
 //!
-//!   cargo run --release --features gui --bin rustmeeter-gui
+//!   cargo run --release -p rustmeeter
+//!
+//! Everything that is not layout lives in `rustmeeter-core`: settings, the caption/tool workers,
+//! the `Service` facade and the local IPC listener. This crate is the WinUI frontend over it.
 //!
 //! Module map:
 //! - [`app`]        component state, lifecycle and layout (one file per panel)
-//! - [`messages`]   messages posted to the UI thread//! - [`fader`]      custom channel fader (dB scale, groove, cap) plus its level meter
+//! - [`messages`]   messages posted to the UI thread
+//! - [`fader`]      custom channel fader (dB scale, groove, cap) plus its level meter
 //! - [`hslider`]    compact horizontal slider used by bus faders and the EQ table
 //! - [`theme`]      palette and reusable view builders
-//! - [`toolcall`]   Needle 3 tool calling for finished caption lines
 //! - [`util`]       small display/domain helpers
 mod component;
 mod app;
-mod config;
 mod fader;
 mod hslider;
 mod messages;
 mod theme;
-mod toolcall;
 mod util;
 
 use std::path::PathBuf;
@@ -62,7 +63,14 @@ impl Application for RustMeeterApp {
 
     fn create(_input: &(), context: &ApplicationContext<Self>) -> Self {
         let shared = app::SharedMixer::new();
-        let icon_path = PathBuf::from(shared.borrow().config.icon.clone());
+        let icon_path = {
+            let shared = shared.borrow();
+            let path = PathBuf::from(&shared.config.icon);
+            if !path.exists() {
+                let _ = shared.config.write_icon(include_bytes!("../assets/app.ico"));
+            }
+            path
+        };
         context.show_window("main");
         // context.show_window("caption"); // TEMP debug
         Self { shared, icon_path }
@@ -78,11 +86,11 @@ impl Application for RustMeeterApp {
             }
             AppAction::Caption => {
                 let mut shared = self.shared.borrow_mut();
-                if shared.caps.active_strip().is_some() {
-                    shared.caps.off();
+                if shared.captions.active_strip().is_some() {
+                    shared.captions.off();
                 } else if shared.config.settings.model_root.is_some() {
-                    let s = &mut *shared;
-                    let _ = s.caps.on(&s.mixer, s.caption_strip);
+                    let strip = shared.caption_strip;
+                    let _ = shared.captions_on(strip);
                 }
             }
             AppAction::CaptionWindow => {

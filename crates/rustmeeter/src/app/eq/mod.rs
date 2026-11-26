@@ -9,7 +9,7 @@ mod geometry;
 mod table;
 
 use rustmeeter_core::*;
-use windows_canvas::{ColorF, canvas_invalidated};
+use windows_canvas::{canvas_invalidated, ColorF};
 use windows_reactor::*;
 
 use self::draw::draw_eq_curve;
@@ -342,6 +342,8 @@ impl MixerApp {
                     BLUE,
                     INK,
                     crate::component::button::Side::None,
+                    (20., 20.),
+                    10.,
                     context.callback(move |()| Message::EqAdd(id)),
                 ),
                 Button::new()

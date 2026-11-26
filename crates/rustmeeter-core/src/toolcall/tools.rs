@@ -1,5 +1,9 @@
 //! Handlers for the tools described in `config.json`.
 //!
+//! These live in the core crate so the GUI, the CLI and the IPC server all execute the same
+//! implementations. A frontend that wants its own tools can build a [`Registry`] and add them
+//! there; the worker's own registry is built by [`register`].
+//!
 //! Nothing is registered yet. To add a tool, put its implementation in this folder and register it
 //! in [`register`]:
 //!

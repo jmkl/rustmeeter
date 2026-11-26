@@ -2,7 +2,10 @@
 
 use windows_reactor::*;
 
-use crate::{component::button::{AcButton, AcButtonInput, Side}, util::{dim_color, shift_hue}};
+use crate::{
+    component::button::{AcButton, AcButtonInput, Side},
+    util::{dim_color, shift_hue},
+};
 
 // Palette. The window is dark acrylic, so cards are translucent white on purpose: they pick up
 // the backdrop instead of painting over it.
@@ -109,7 +112,11 @@ pub(crate) fn arrow() -> TextBlock {
 
 /// A and B are brand colours, not accents: the route chips, the badges and the faders all agree.
 pub(crate) fn bus_color(bus: usize) -> Color {
-    if bus == 0 { GREEN } else { BLUE }
+    if bus == 0 {
+        GREEN
+    } else {
+        BLUE
+    }
 }
 
 /// Place an already-built `View` in a grid cell. Declaration types carry `grid_column` themselves;
@@ -118,27 +125,27 @@ pub(crate) fn in_column(child: impl Into<View>, column: i32) -> Border {
     Border::new().grid_column(column).content(child)
 }
 
-
 pub(crate) fn action_button(
     text: &str,
     bg: Color,
     fg: Color,
-    side:Side,
+    side: Side,
+    size: (f64, f64),
+    font_size: f64,
     click: impl IntoUnitCallback,
-) -> View{
-  View::component::<AcButton>(AcButtonInput{
-    glyph: text.into(),
-    hover_bg: dim_color(bg, 0.5),
-    bg,
-    pressed_bg: shift_hue(bg, 15.),
-    fg,
-    on_click: click.into_unit_callback(),
-    side,
-})
-
+) -> View {
+    View::component::<AcButton>(AcButtonInput {
+        glyph: text.into(),
+        size,
+        font_size,
+        hover_bg: dim_color(bg, 0.5),
+        bg,
+        pressed_bg: shift_hue(bg, 15.),
+        fg,
+        on_click: click.into_unit_callback(),
+        side,
+    })
 }
-
-
 
 /// Small square toggle. The button's own padding would clip a single glyph, so the label is
 /// pulled outward with a negative margin (WinUI buttons do not clip their content).
@@ -294,5 +301,9 @@ const METER_MIN_DB: f32 = -60.0;
 const METER_MAX_DB: f32 = 0.0;
 
 fn segment_color(db: f32) -> Color {
-    if db >= -12.0 { AMBER } else { GREEN }
+    if db >= -12.0 {
+        AMBER
+    } else {
+        GREEN
+    }
 }

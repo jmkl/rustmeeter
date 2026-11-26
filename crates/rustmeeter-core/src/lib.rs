@@ -32,8 +32,14 @@ mod eq;
 mod events;
 mod mixer;
 mod params;
+mod service;
 mod tap;
 mod vad;
+
+pub mod ipc;
+pub mod settings;
+pub mod toolcall;
+pub mod wav;
 
 #[cfg(feature = "cactus")]
 pub use cactus::{Agent, Cactus, Mirage, Models, Whistle};
@@ -54,5 +60,10 @@ pub use eq::{
 pub use events::{Event, EventHandler};
 pub use mixer::{Bus, BusView, Mixer, MixerView, Strip, StripId, StripView};
 pub use params::{MAX_DB, MIN_DB, NUM_BUSES, Params};
+pub use service::{
+    LiveSettings, SETTINGS_SAVE_DELAY, Service, ServiceCallbacks, bus_name, default_routes,
+};
+pub use settings::{BusSettings, Conf, Settings, StripSettings, app_config_dir};
 pub use tap::{TAP_RATE, Tap};
+pub use toolcall::{ToolCallHandle, ToolCallRecord, ToolCallReport};
 pub use vad::{Segmenter, Utterance};

@@ -154,7 +154,7 @@ impl Component for CaptionWindow {
             // would leave the waveform and the pill frozen forever after such a toggle. Idle polls
             // are slow enough to be free, and go back to full speed once a start is seen.
             Msg::Tick => {
-                let active = self.shared.borrow().caps.active_strip().is_some();
+                let active = self.shared.borrow().captions.active_strip().is_some();
                 let delay = if active { TICK } else { IDLE_TICK };
                 self.timer = Some(context.set_timeout(delay, Msg::Tick));
             }
@@ -179,9 +179,9 @@ impl Component for CaptionWindow {
         let (active, status, latest, _strips, _selected, icon, running) = {
             let shared = self.shared.borrow();
             (
-                shared.caps.active_strip(),
-                shared.caps.status(),
-                shared.caps.latest(),
+                shared.captions.active_strip(),
+                shared.captions.status(),
+                shared.captions.latest(),
                 shared
                     .mixer
                     .strips()

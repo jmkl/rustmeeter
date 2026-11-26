@@ -3,12 +3,11 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 
 /// An audio source. `loopback == true` captures what an *output* device is playing (WASAPI loopback).
-#[derive(Clone, PartialEq, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct InputSource {
-    #[cfg_attr(feature = "serde", serde(default))]
+    #[serde(default)]
     pub name: String,
-    #[cfg_attr(feature = "serde", serde(default))]
+    #[serde(default)]
     pub loopback: bool,
 }
 

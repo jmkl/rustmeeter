@@ -25,14 +25,17 @@
 //! caption, whether it matched a trigger, Needle's raw JSON (including `reasoning`, `confidence`
 //! and `suppressed_calls`), and each executed call's result.
 
-mod registry;
+pub mod registry;
 mod tools;
 
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
+#[cfg(feature = "cactus")]
+use anyhow::{Context, bail};
 use regex::{Regex, RegexBuilder};
-use rustmeeter_core::Agent;
 use serde_json::Value;
+#[cfg(feature = "cactus")]
 use std::fs::{File, OpenOptions};
+#[cfg(feature = "cactus")]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -40,28 +43,31 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
+#[cfg(feature = "cactus")]
 use self::registry::Registry;
+#[cfg(feature = "cactus")]
+use crate::Agent;
 
-/// What one caption line turned into. Reported back to the UI thread after the worker is done.
+/// What one caption line turned into. Reported back to the frontend after the worker is done.
 #[derive(Clone, Debug)]
-pub(crate) struct ToolCallReport {
+pub struct ToolCallReport {
     /// The caption text that was sent to Needle.
-    pub(crate) text: String,
-    pub(crate) calls: Vec<ToolCallRecord>,
+    pub text: String,
+    pub calls: Vec<ToolCallRecord>,
     /// Load, completion, or schema failure. A refusal (no function calls) is not an error.
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ToolCallRecord {
-    pub(crate) name: String,
-    pub(crate) arguments: Value,
-    pub(crate) result: Result<Value, String>,
+pub struct ToolCallRecord {
+    pub name: String,
+    pub arguments: Value,
+    pub result: Result<Value, String>,
 }
 
 /// Handle shared with the caption callback. It only queues text; all model work happens on the
 /// worker thread.
-pub(crate) struct ToolCallHandle {
+pub struct ToolCallHandle {
     sender: Mutex<Option<Sender<String>>>,
     enabled: Arc<AtomicBool>,
     worker: Mutex<Option<JoinHandle<()>>>,
@@ -70,7 +76,7 @@ pub(crate) struct ToolCallHandle {
 impl ToolCallHandle {
     /// Start the worker. `model` is `needle3.cact`; `tools` is the raw schema array from settings,
     /// so the engine accepts either Needle's compact form or OpenAI-style functions.
-    pub(crate) fn start(
+    pub fn start(
         model: Option<PathBuf>,
         tools: Vec<Value>,
         log: Option<PathBuf>,
@@ -115,16 +121,16 @@ impl ToolCallHandle {
         handle
     }
 
-    pub(crate) fn enabled(&self) -> bool {
+    pub fn enabled(&self) -> bool {
         self.enabled.load(Relaxed)
     }
 
-    pub(crate) fn set_enabled(&self, enabled: bool) {
+    pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Relaxed);
     }
 
     /// Queue one finished caption. Cheap: the caption thread never waits for the model.
-    pub(crate) fn submit(&self, text: &str) {
+    pub fn submit(&self, text: &str) {
         if !self.enabled() || text.trim().is_empty() {
             return;
         }
@@ -192,6 +198,7 @@ impl Triggers {
         }
     }
 
+    #[cfg_attr(not(feature = "cactus"), allow(dead_code))]
     fn matches(&self, text: &str) -> bool {
         match self {
             Self::All => true,
@@ -201,10 +208,12 @@ impl Triggers {
 }
 
 /// Append-only debug log. Missing or unopenable file just silences logging.
+#[cfg(feature = "cactus")]
 struct Log {
     file: Option<File>,
 }
 
+#[cfg(feature = "cactus")]
 impl Log {
     fn new(path: Option<PathBuf>) -> Self {
         let file = path.and_then(|path| match OpenOptions::new().create(true).append(true).open(&path)
@@ -231,6 +240,7 @@ impl Log {
     }
 }
 
+#[cfg(feature = "cactus")]
 fn run(
     receiver: Receiver<String>,
     enabled: Arc<AtomicBool>,
@@ -264,6 +274,77 @@ fn run(
     }
 }
 
+/// The worker exists even in builds without Cactus; it just drains its queue, so a frontend can
+/// keep the same wiring and the missing model becomes a per-call error instead of a build error.
+#[cfg(not(feature = "cactus"))]
+fn run(
+    receiver: Receiver<String>,
+    enabled: Arc<AtomicBool>,
+    _model: Option<PathBuf>,
+    _tools_json: Option<String>,
+    _triggers: Triggers,
+    _log: Option<PathBuf>,
+    notify: Arc<dyn Fn(ToolCallReport) + Send + Sync>,
+) {
+    for text in receiver {
+        if !enabled.load(Relaxed) {
+            continue;
+        }
+        notify(run_once(None, &[], &text, None));
+    }
+}
+
+/// Run one line synchronously, without the worker thread.
+///
+/// This is the entry point behind the IPC `toolcall` method: the caller deliberately asked for
+/// this text to be acted on, so the trigger regexes are not consulted. A fresh `Agent` handle is
+/// used (the Cactus engine is process-global and its load is guarded by path), which makes this
+/// safe to call from a thread that does not own the caption worker. It blocks for as long as the
+/// model takes; an IPC frontend should expect that.
+#[cfg(feature = "cactus")]
+pub fn run_once(
+    model: Option<&Path>,
+    tools: &[Value],
+    text: &str,
+    log: Option<&Path>,
+) -> ToolCallReport {
+    let tools_json = if tools.is_empty() {
+        None
+    } else {
+        serde_json::to_string(tools).ok()
+    };
+    let registry = Registry::new();
+    let mut log = Log::new(log.map(Path::to_path_buf));
+    log.write("heard", text);
+    let mut agent: Option<Agent> = None;
+    execute(
+        &mut agent,
+        model,
+        tools_json.as_deref(),
+        &registry,
+        text,
+        &mut log,
+    )
+}
+
+/// Without the Cactus engine there is no Needle to ask; report the same shape as a load failure.
+#[cfg(not(feature = "cactus"))]
+pub fn run_once(
+    _model: Option<&Path>,
+    _tools: &[Value],
+    text: &str,
+    _log: Option<&Path>,
+) -> ToolCallReport {
+    ToolCallReport {
+        text: text.to_string(),
+        calls: Vec::new(),
+        error: Some(
+            "this build has no Cactus engine: rebuild with default features (see README)".to_string(),
+        ),
+    }
+}
+
+#[cfg(feature = "cactus")]
 fn execute(
     agent: &mut Option<Agent>,
     model: Option<&Path>,
@@ -290,6 +371,7 @@ fn execute(
     }
 }
 
+#[cfg(feature = "cactus")]
 fn execute_inner(
     agent: &mut Option<Agent>,
     model: Option<&Path>,
@@ -312,7 +394,7 @@ fn execute_inner(
     // model turn, so a caption transcription cannot interleave with Needle's but a slow tool body
     // does not stall the captions.
     let raw = {
-        let _guard = rustmeeter_core::cactus_call_lock();
+        let _guard = crate::cactus_call_lock();
         if agent.is_none() {
             log.write("load", &format!("{}", model.display()));
             let loaded =
@@ -378,7 +460,7 @@ fn execute_inner(
     Ok(records)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cactus"))]
 mod tests {
     use super::Triggers;
     use serde_json::{Value, json};

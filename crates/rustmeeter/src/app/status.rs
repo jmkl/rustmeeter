@@ -70,7 +70,7 @@ impl MixerApp {
     pub(crate) fn status_bar(&self, view: &MixerView) -> View {
         let (status, active_strip_num) = {
             let shared = self.shared.borrow();
-            (shared.caps.status(), shared.caps.active_strip())
+            (shared.captions.status(), shared.captions.active_strip())
         };
         let state = status.as_ref().map(|s| s.state());
 

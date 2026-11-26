@@ -7,10 +7,6 @@ pub(crate) fn zeroed(db: f32) -> f32 {
     if db.abs() < 0.05 { 0.0 } else { db }
 }
 
-pub(crate) fn bus_name(bus: usize) -> &'static str {
-    if bus == 0 { "A" } else { "B" }
-}
-
 pub(crate) fn dim_color(color: Color, factor: f32) -> Color {
     let factor = factor.clamp(0.0, 1.0);
 

@@ -15,9 +15,8 @@ pub const EQ_GAIN_MAX: f32 = 15.0;
 pub const EQ_Q_MIN: f32 = 0.1;
 pub const EQ_Q_MAX: f32 = 10.0;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "kebab-case"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum EqKind {
     HighPass,
     LowShelf,
@@ -85,9 +84,8 @@ impl EqKind {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(default))]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct EqBand {
     pub enabled: bool,
     pub kind: EqKind,
@@ -173,9 +171,8 @@ impl EqBand {
     }
 }
 
-#[derive(Clone, PartialEq, Debug, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(default))]
+#[derive(Clone, PartialEq, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct EqSettings {
     pub bypass: bool,
     pub bands: Vec<EqBand>,

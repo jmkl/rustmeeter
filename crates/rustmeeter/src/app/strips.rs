@@ -5,8 +5,9 @@ use std::sync::Arc;
 use rustmeeter_core::*;
 use windows_reactor::*;
 
-use super::MixerApp;
 use super::eq::eq_button;
+use super::MixerApp;
+use crate::component::button::Side;
 use crate::fader::fader;
 use crate::messages::Message;
 use crate::theme::*;
@@ -237,7 +238,7 @@ fn route_chip(params: &Arc<Params>, bus: usize, view: &MixerView, strip: &StripV
     };
     let live = params.clone();
     chip(bus_name(bus), bg, fg)
-        .width(32.0)
+        .width(25.0)
         .on_click(move || live.set_routed(bus, !on))
         .tooltip(hint)
         .into()

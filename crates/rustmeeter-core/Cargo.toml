@@ -9,15 +9,17 @@ ringbuf = "0.3"
 biquad = "0.4"
 anyhow = "1"
 chrono = "0.4"
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 cactus-core = { path = "../cactus-core", optional = true }
 
 [features]
 default = ["cactus"]
-cactus = ["dep:cactus-core", "dep:serde_json"]
-# `Serialize`/`Deserialize` for the settings types (`EqSettings`), so a frontend can store them.
-serde = ["dep:serde"]
+cactus = ["dep:cactus-core"]
+# Kept for compatibility with older build scripts; serde is always available now because the
+# settings file and the IPC API are part of the core crate.
+serde = []
 
 [lib]
 name = "rustmeeter_core"

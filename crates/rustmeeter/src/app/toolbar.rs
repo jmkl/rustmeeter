@@ -10,7 +10,6 @@ use windows_reactor::*;
 use super::MixerApp;
 use crate::messages::Message;
 use crate::theme::*;
-use crate::util::*;
 
 impl MixerApp {
     pub(crate) fn toolbar(&self, view: &MixerView, context: &ViewContext<Self>) -> View {

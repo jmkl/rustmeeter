@@ -8,10 +8,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 const USAGE: &str = "\
-rustmeeter list
-rustmeeter run [--bus-a DEVICE] [--bus-b DEVICE] [--mic DEVICE[:AB]]... [--loopback DEVICE[:AB]]...
+rsmtr list
+rsmtr run [--bus-a DEVICE] [--bus-b DEVICE] [--mic DEVICE[:AB]]... [--loopback DEVICE[:AB]]...
               [--captions [FILE]] [--whistle whistle.cact] [--caption-strip N]
               [--caption-lang en] [--caption-threads N]
+rsmtr serve [--port N] [--no-start]
+
+  serve    headless 'GUI mode': open the saved rack from config.json, start audio, and expose the
+           same JSON-over-TCP API the GUI exposes. 127.0.0.1 only; default port 7590.
+           Clients send one JSON object per line, e.g.
+             {\"id\":1,\"method\":\"list_devices\",\"params\":{}}
 
   DEVICE   case-insensitive name or substring, or 'default'. Quote names with spaces.
   :AB      routes, e.g. ':A', ':B', ':AB'. Defaults: --mic -> B, --loopback -> A.
@@ -52,6 +58,7 @@ fn main() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("list") => cmd_list(),
         Some("run") => cmd_run(&args[1..]),
+        Some("serve") => cmd_serve(&args[1..]),
         _ => {
             print!("{USAGE}");
             Ok(())
@@ -86,6 +93,68 @@ fn cmd_list() -> Result<()> {
             }
         );
     }
+    Ok(())
+}
+
+/// Headless service mode: the same settings, workers and IPC surface as the GUI, without windows.
+/// Useful for testing scripts against the API, or for running the mixer from a terminal.
+fn cmd_serve(args: &[String]) -> Result<()> {
+    let mut port = rustmeeter_core::ipc::DEFAULT_PORT;
+    let mut start = true;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--port" => port = flag_value(&mut it, a)?.parse()?,
+            "--no-start" => start = false,
+            other => bail!("unknown argument '{other}'\n\n{USAGE}"),
+        }
+    }
+
+    let mut service = Service::open(ServiceCallbacks {
+        event: Some(Arc::new(|e: &Event| match e {
+            Event::Error(m) => eprintln!("error: {m}"),
+            Event::Warning(m) => eprintln!("warning: {m}"),
+            Event::Started => {}
+        })),
+        caption: Arc::new(|c: &Caption| {
+            println!("\n[{}] {}: {}", c.time.format("%H:%M:%S"), c.label, c.text)
+        }),
+        toolcall: Arc::new(|report: ToolCallReport| {
+            if let Some(error) = &report.error {
+                eprintln!("toolcall \"{}\": {error}", report.text.trim());
+            }
+            for call in report.calls {
+                match call.result {
+                    Ok(value) => println!("tool {} {} -> {value}", call.name, call.arguments),
+                    Err(e) => eprintln!("tool {} {} failed: {e}", call.name, call.arguments),
+                }
+            }
+        }),
+        caption_lang: None,
+        caption_threads: None,
+    })?;
+
+    if start {
+        service.start()?;
+    }
+    let server = rustmeeter_core::ipc::Server::bind(port)?;
+    println!(
+        "Serving on {}. Send one JSON object per line (method \"shutdown\" to stop).",
+        server.addr()
+    );
+
+    let mut stop = false;
+    while !stop {
+        server.poll(|line| {
+            if line.contains("\"method\":\"shutdown\"") || line.contains("\"method\": \"shutdown\"")
+            {
+                stop = true;
+            }
+            rustmeeter_core::ipc::dispatch(&mut service, line)
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    service.stop();
     Ok(())
 }
 

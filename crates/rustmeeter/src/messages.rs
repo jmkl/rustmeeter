@@ -1,14 +1,15 @@
 //! Messages sent to the UI thread: user actions, async events and the meter tick.
 
+use rustmeeter_core::toolcall::ToolCallReport;
 use rustmeeter_core::*;
-
-use crate::toolcall::ToolCallReport;
 
 /// Messages sent to the UI thread: user actions, async events and the meter tick.
 #[derive(Clone)]
 pub(crate) enum Message {
     ToggleTitleBar,
     Tick,
+    /// Pump the local IPC listener (independent of the meter tick, which stops when audio is off).
+    IpcTick,
     Event(Event),
     Caption(Caption),
     /// Result of the Needle toolcall worker for one caption line.
@@ -50,4 +51,5 @@ pub(crate) enum Message {
         left: bool,
     },
     EqAdd(StripId),
+    OpenSetting,
 }
