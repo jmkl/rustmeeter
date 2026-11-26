@@ -790,12 +790,7 @@ dependencies = [
 name = "rustmeeter"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "chrono",
- "regex",
  "rustmeeter-core",
- "serde",
- "serde_json",
  "windows-canvas",
  "windows-core 0.101.0",
  "windows-reactor",
@@ -820,6 +815,7 @@ dependencies = [
  "cactus-core",
  "chrono",
  "cpal",
+ "regex",
  "ringbuf",
  "serde",
  "serde_json",

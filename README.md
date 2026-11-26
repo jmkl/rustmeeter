@@ -8,7 +8,10 @@ real devices (and VB-Cable) and has a live speech-to-text caption logger built o
 - Two output buses (A, B), each to any output device, with master gain/mute/meter
 - **Live captions**: a passive copy of one strip is cut into utterances and transcribed
   in-process by Whistle into `captions.log`. Toggle on/off at runtime. Discord/OBS never notice.
-- Two frontends over one clean library (`Mixer`, `Params`, `Tap`): a CLI and a windows-reactor GUI
+- **Needle tool calling**: a finished caption can be sent to Needle 3, whose function calls run
+  handlers in this repo (currently `switch_light`).
+- Two frontends over one library (`rustmeeter-core`): a CLI and a WinUI 3 GUI. Both expose the
+  same JSON-over-TCP API on `127.0.0.1` for external scripts (see `DOCS.md` §5).
 
 ## 1. One-time setup (Windows)
 
@@ -35,19 +38,19 @@ Project files that make this work (already set up, edit only if your paths diffe
 ## 2. Build
 
 ```
-cargo build --release
+cargo build --release -p rustmeeter-cli
 ```
-Output: `target\x86_64-pc-windows-gnullvm\release\rustmeeter.exe`
+Output: `target\x86_64-pc-windows-gnullvm\release\rustmeeter.exe` (the CLI).
 
-The GUI is a second binary behind the `gui` feature (windows-reactor):
+The GUI is a separate package with the same binary name, so always build it by package:
 ```
-cargo build --release --features gui
+cargo build --release -p rustmeeter
 ```
-Output: `target\x86_64-pc-windows-gnullvm\release\rustmeeter-gui.exe` (see §7).
+It needs the sibling checkout `E:\_CODE\rust\windows-rs` (path dependencies).
 
 The `cactus` feature is **on by default** (captions available). No Cactus files / no C++ toolchain?
 ```
-cargo build --release --no-default-features
+cargo build --release -p rustmeeter-cli --no-default-features
 ```
 The mixer then works as usual; `captions on` just says the build has no Cactus engine.
 
@@ -56,8 +59,8 @@ The mixer then works as usual; `captions on` just says the build has no Cactus e
 ## 3. Run
 
 ```
-rustmeeter list                       # show devices
-rustmeeter run --bus-a "Speakers (Realtek(R) Audio)" --bus-b "CABLE Input" ^
+rsmtr list                            # show devices
+rsmtr run --bus-a "Speakers (Realtek(R) Audio)" --bus-b "CABLE Input" ^
                --mic "Headset Microphone (MH752)"
 ```
 - Device names are case-insensitive substrings (or `default`); quote names with spaces.
@@ -65,6 +68,13 @@ rustmeeter run --bus-a "Speakers (Realtek(R) Audio)" --bus-b "CABLE Input" ^
   Override with a suffix: `--mic "Headset:AB"`.
 - Typical Discord/OBS setup: bus A = your headphones, bus B = `CABLE Input`;
   in Discord/OBS choose `CABLE Output` as the microphone.
+
+For a headless session that scripts can drive, `serve` opens the saved rack from
+`%APPDATA%\rustmeeter\config.json` and exposes the JSON API (see `DOCS.md` §5):
+
+```
+rsmtr serve --port 7590
+```
 
 ### Routing: what bus A and bus B are for
 
@@ -113,7 +123,7 @@ routed only to B is still transcribed. "First mic" means the first strip that is
 ### Live captions
 
 ```
-rustmeeter run ... --mic "Headset Microphone (MH752)" --captions captions.log --whistle cactus\whistle.cact
+rsmtr run ... --mic "Headset Microphone (MH752)" --captions captions.log --whistle cactus\whistle.cact
 ```
 - `--captions [FILE]` starts captions right away; otherwise start them any time with `captions on`.
 - The model (`cactus\whistle.cact` by default, or `--whistle PATH`) loads on first use only.
@@ -200,33 +210,48 @@ untouched.
   The common case is a `[Loopback] CABLE Output` strip: see §3 Routing for the intended A/B table.
 - **`libcactus.a not found`** at build: put it in `cactus\` or set `CACTUS_LIB_DIR`; or `--no-default-features`.
 - **`cannot find -lgcc_eh`**: you are on the GNU target with TDM-GCC. Use the gnullvm setup above.
-- **Captions look like raw JSON**: the engine's output format is parsed in `src/cactus.rs`
-  (`extract_text`, looks for `text`/`response`/`audio_text`/`transcript`). Adjust the key there.
-- **Captions cut too early/late or pick up noise**: constants at the top of `src/vad.rs`.
+- **Captions look like raw JSON**: the engine's output format is parsed in
+  `crates/cactus-core/src/lib.rs` (`extract_text`, looks for
+  `text`/`response`/`audio_text`/`transcript`). Adjust the key there.
+- **Captions cut too early/late or pick up noise**: constants at the top of
+  `crates/rustmeeter-core/src/vad.rs`.
+- **`IPC disabled` at startup**: another process (the GUI or another `serve`) is already on the
+  port. Set `RUSTMEETER_IPC_PORT` to another port, or `0` to disable it for the GUI.
 
 ## 5. How it is built
 
 ```
-src/main.rs      CLI (uses only the public library API)
-src/lib.rs       public API: Mixer, Params, Tap, CaptionLogger, device helpers
-src/mixer.rs     Mixer: strips + 2 buses, start / stop / apply
-src/params.rs    lock-free controls (gain, mute, EQ, routing, meters) shared with audio threads
-src/devices.rs   device discovery (cpal / WASAPI)
-src/engine.rs    internal: cpal streams, resampling, EQ, mixing (input -> per-bus ring -> output)
-src/tap.rs       passive per-strip copy of the raw input; dormant until subscribed
-src/vad.rs       energy-based utterance segmenter (16 kHz mono)
-src/events.rs    Event + EventHandler: stream errors / lifecycle reported to any frontend
-src/gui/main.rs  windows-reactor GUI (feature `gui`), a thin frontend over the library
-src/captions.rs  Tap -> VAD -> Transcriber -> log file
-src/caption_controller.rs  runtime captions on/off, lazy one-time model load (used by CLI and any GUI)
-src/cactus.rs    FFI to libcactus (feature `cactus`): Whistle (speech), Agent (Needle 3 text/tool calling), Mirage (vision); streaming transcription too
-examples/needle3_toolcall.rs   runnable Needle 3 tool-calling demo (`cargo run --release --example needle3_toolcall --features cactus`)
-build.rs         links Cactus + static libc++/libunwind
+crates/
+  cactus-core/          FFI to libcactus.a: Cactus, Whistle, Agent, Mirage
+  rustmeeter-core/      the library (everything shared):
+    mixer.rs            Mixer: strips + 2 buses, start / stop / apply
+    params.rs           lock-free controls (gain, mute, EQ, routing, meters) shared with audio threads
+    devices.rs          device discovery (cpal / WASAPI)
+    engine.rs           internal: cpal streams, resampling, EQ, mixing (input -> per-bus ring -> output)
+    tap.rs              passive per-strip copy of the raw input; dormant until subscribed
+    vad.rs              energy-based utterance segmenter (16 kHz mono)
+    captions.rs         Tap -> VAD -> Transcriber -> log file
+    caption_controller.rs  runtime captions on/off, lazy one-time model load
+    settings.rs         Conf/Settings: %APPDATA%\rustmeeter\config.json, migration, atomic save
+    service.rs          Service: owns Mixer + captions + Needle worker + Conf; debounced saves
+    toolcall/           Needle 3 worker, synchronous run_once, tool registry/handlers
+    wav.rs              small WAV -> 16 kHz mono decoder (for `transcribe`)
+    ipc.rs              line-delimited JSON over TCP on 127.0.0.1: Server + dispatch
+  rustmeeter/           WinUI 3 GUI frontend (windows-reactor); no audio/settings/tool logic
+  rustmeeter-cli/       CLI frontend: list, run + REPL, serve (headless Service + IPC)
+  recorder/             Whistle fine-tuning dataset recorder
+examples/needle3_toolcall.rs   runnable Needle 3 tool-calling demo (`cargo run --release --example needle3_toolcall`)
+build.rs                links Cactus + static libc++/libunwind
 ```
 Key ideas:
 - Live controls are atomics (`Arc<Params>`): instant, any thread. Structural changes
   (`add_strip`, `remove_strip`, `set_bus_device`) mark the config dirty; `Mixer::apply()` rebuilds streams.
 - `Mixer` holds cpal streams (not `Send`): keep it on one thread (the GUI keeps it on the UI thread).
+- `Service` owns the mixer, caption controller, Needle worker and settings, and is the single thing
+  both frontends drive. The GUI wraps it (`SharedMixer`, with `Deref`); `serve` uses it directly.
+- **Local IPC**: `ipc::Server` only does socket I/O on background threads. The frontend calls
+  `poll` from the thread that owns the `Service`, so requests execute where the mixer lives.
+  `toolcall`/`transcribe` are synchronous and block that poller by design.
 - **Runtime captions toggle**: whether Cactus is *linked* is a build-time choice (the feature), but
   captioning itself is runtime. Every strip owns a tap buffer from creation; it only records while a
   `Tap` is subscribed (`mixer.subscribe(id)`), so `captions on/off` needs no stream restart.
@@ -237,20 +262,22 @@ Key ideas:
 ## 6. Ideas / next steps
 
 - Streaming transcription (`cactus_stream_transcribe_process`) for captions while still speaking
-- Needle 3 (tool calling) on the transcript: voice commands like "mute my mic" (wake word first)
+- More Needle tools, and an async IPC variant that does not block the mixer's thread
 - GUI polish (per-strip width), per-app capture
 - Own virtual audio driver (SysVAD fork) instead of VB-Cable
 
-## 7. GUI (optional, feature `gui`)
+## 7. GUI
 
 ```
-cargo run --release --features gui --bin rustmeeter-gui
+cargo run --release -p rustmeeter
 ```
 
-windows-reactor (WinUI 3). Like the CLI it is only a frontend: it talks to `Mixer`, `Params`,
-`Mixer::snapshot()`, `CaptionController` and `Mixer::set_event_handler()`, and contains no audio
-code. It starts with bus A = your default output and your default mic as strip 1 (→ bus B); wire
-the rest up with the device pickers and "Add input".
+windows-reactor (WinUI 3). It is only a frontend over `rustmeeter-core`: it wraps `Service`
+(and derefs to it), so it talks to `Mixer`, `Params`, `CaptionController`, the Needle worker and
+`Conf` exactly as the CLI does, and contains no audio, settings or tool logic. It opens the same
+saved rack as the CLI and starts the local IPC listener on port 7590 (`RUSTMEETER_IPC_PORT` to
+change, `0` to disable). It starts with bus A = your default output and your default mic as
+strip 1 (→ bus B); wire the rest up with the device pickers and "Add input".
 
 - **Toolbar**: Start/Stop, "Refresh devices", bus A and bus B device pickers (both include `None`),
   "Add input" (mics and `[Loopback]` sources), and the caption controls.

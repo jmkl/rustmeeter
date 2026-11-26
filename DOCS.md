@@ -15,7 +15,10 @@ A small Voicemeeter-style audio mixer for Windows, written in Rust, plus the AI 
 - **Tool calling**: each finished caption can be sent to the Cactus **Needle 3** text agent, whose
   function calls are dispatched to handlers registered in this repo.
 
-Everything user-visible is a *frontend* over one library. There is no service, daemon or IPC.
+Everything user-visible is a *frontend* over one library. The heavy lifting (audio engine, settings,
+caption/tool workers, and the local API) lives in `rustmeeter-core`; the GUI and CLI are thin
+frontends. The GUI and `rustmeeter-cli serve` expose a JSON-over-TCP API on loopback for external
+scripts (see §5).
 
 ## 2. Workspace map
 
@@ -24,9 +27,9 @@ Cargo.toml                  workspace: 5 members, edition 2024, resolver 2
 .cargo/config.toml          forces target x86_64-pc-windows-gnullvm + llvm-mingw linker
 crates/
   cactus-core/              FFI wrapper around libcactus.a (Whistle / Needle / Mirage)
-  rustmeeter-core/          the mixer engine library (the only API frontends need)
-  rustmeeter/               GUI frontend (windows-reactor / WinUI 3)
-  rustmeeter-cli/           CLI frontend (`list`, `run` + interactive REPL)
+  rustmeeter-core/          engine + service + settings + toolcall + local IPC (everything shared)
+  rustmeeter/               GUI frontend (windows-reactor / WinUI 3), no audio or settings logic
+  rustmeeter-cli/           CLI frontend (`list`, `run` + REPL, `serve` = headless IPC)
   recorder/                 standalone Whistle fine-tuning dataset recorder
 finetune/                   sample datasets produced by recorder (gitignored)
 cactus/                     libcactus.a + *.cact models (gitignored)
@@ -37,8 +40,8 @@ cactus/                     libcactus.a + *.cact models (gitignored)
 | Crate | Kind | Depends on | Notes |
 |---|---|---|---|
 | `cactus-core` | lib `cactus_core` | `libcactus.a` (native) | Always links the native engine via `build.rs`. |
-| `rustmeeter-core` | lib `rustmeeter_core` | cpal, ringbuf, biquad, chrono, anyhow; optional `cactus-core`, serde | Feature `cactus` (default) pulls in Cactus + serde_json. |
-| `rustmeeter` | bin `rustmeeter` | `rustmeeter-core` (with `serde`), windows-reactor/canvas/core/text | GUI. |
+| `rustmeeter-core` | lib `rustmeeter_core` | cpal, ringbuf, biquad, chrono, anyhow, regex, serde, serde_json; optional `cactus-core` | Feature `cactus` (default) pulls in the models. Settings, toolcall and IPC are always available. |
+| `rustmeeter` | bin `rustmeeter` | `rustmeeter-core`, windows-reactor/canvas/core/text | GUI. |
 | `rustmeeter-cli` | bin `rustmeeter` | `rustmeeter-core` | CLI. |
 | `recorder` | bin `recorder` | cpal, crossterm, hound | Independent of the mixer. |
 
@@ -46,8 +49,6 @@ cactus/                     libcactus.a + *.cact models (gitignored)
 `rustmeeter`, so a plain `cargo build --release` writes both to the same
 `target/<triple>/release/rustmeeter.exe` and one overwrites the other. Build and run them by
 package (`-p rustmeeter` / `-p rustmeeter-cli`) rather than relying on the output filename.
-The README still describes an older `--features gui` / `rustmeeter-gui.exe` layout; the current
-manifests have no `gui` feature — the GUI is always built by the `rustmeeter` package.
 
 ## 3. Core engine (`rustmeeter-core`)
 
@@ -55,6 +56,19 @@ Public API is re-exported from `src/lib.rs`: `Mixer`, `Strip`, `Bus`, `MixerView
 `Params`, `Tap`, `Event`/`EventHandler`, `EqSettings`/`EqBand`/`EqKind`, the device helpers,
 and (with `cactus`) `CaptionController`, `CaptionLogger`, `CaptionStatus`, `Transcriber`,
 `SharedTranscriber`, `Agent`, `Whistle`, `Mirage`.
+
+The frontend-facing additions are:
+
+- `settings` — `Conf`, `Settings`, `StripSettings`, `BusSettings`, `app_config_dir`. The JSON
+  document, migration and atomic write live here, not in the GUI.
+- `Service` — owns `Mixer`, `CaptionController`, `ToolCallHandle` and `Conf`, restores the saved
+  rack/buses, debounces settings writes, and exposes `add_strip`/`remove_strip`,
+  `captions_on`/`captions_off`, `set_toolcall_enabled`, `toolcall(text)` and `transcribe(path)`.
+  `ServiceCallbacks` routes events/captions/tool reports back to the frontend.
+- `toolcall` — `ToolCallHandle` (caption worker), `run_once` (synchronous), `Tool`/`Registry`,
+  built-in handler `switch_light`.
+- `wav` — a small WAV reader (`read_pcm16k`) used by `transcribe`.
+- `ipc` — `Server` (background TCP accept threads + polled dispatch) and `dispatch`. See §5.
 
 ### Threading model
 
@@ -162,8 +176,8 @@ windows-reactor (WinUI 3) application. It contains **no audio code** — only `r
 types. Module layout:
 
 ```
-src/main.rs        RustMeeterApp: tray icon, menu, window registration
-src/app/mod.rs     SharedMixer state, settings persistence, layout, message loop
+src/main.rs        RustMeeterApp: tray icon, menu, window registration, icon extraction
+src/app/mod.rs     SharedMixer wrapper around core Service, layout, message loop, IPC pump
 src/app/toolbar.rs bus A/B pickers + "add source" combo
 src/app/strips.rs  horizontally scrolling strip cards (route chips, mute, EQ entry, fader)
 src/app/buses.rs   side panel with the two bus cards
@@ -171,24 +185,28 @@ src/app/status.rs  bottom bar: engine state, caption state dot + level graph, co
 src/app/transcript.rs  current caption line (large, centred)
 src/app/caption_window.rs  standalone always-on-top caption bar opened from the tray
 src/app/eq/        full-window parametric EQ modal: Direct2D graph + band table
-src/config.rs      %APPDATA%\rustmeeter\config.json schema and loading/saving
 src/fader.rs       custom vertical channel fader (dB taper, 0.5 dB snap, segmented meter)
 src/hslider.rs     compact horizontal slider for the EQ table
 src/theme.rs       palette + reusable view builders (card, chip, badge, spark, vmeter)
 src/component/      AcButton (hover/press states, rounded sides)
-src/toolcall/      Needle 3 worker: trigger gating, registry, handlers
-src/util.rs        display/domain helpers (bus names, colour maths)
+src/util.rs        display/domain helpers (colour maths, dB formatting)
 src/messages.rs    Message enum sent to the UI thread
 ```
 
+The GUI no longer owns `config.rs` or `toolcall/`; both moved to `rustmeeter-core`.
+
 ### Shared state
 
-`SharedMixer` (`Rc<RefCell<>>`, single UI thread) holds everything that must outlive a window:
-`Mixer`, `CaptionController`, `ToolCallHandle`, `Conf`, the selected caption strip, the latest
-caption, the pending/saved settings snapshots and a debounce deadline, and the single
+`SharedMixer` (`Rc<RefCell<>>`, single UI thread) is a thin wrapper: a core `Service` plus the single
 `completion_slot` used to forward engine/caption/toolcall events into whichever window component
-exists. Closing a window drops only UI state; audio keeps running. `MixerApp::drop` flushes
-settings, because the debounce timer will never fire again after close.
+exists. It implements `Deref`/`DerefMut` to `Service`, so panels keep writing `shared.mixer`,
+`shared.config`, `shared.captions`, `shared.toolcall`, etc. Closing a window drops only UI state;
+audio keeps running. `MixerApp::drop` flushes settings, because the debounce timer will never fire
+again after close.
+
+`MixerApp` also owns the optional IPC `Server`. A separate 100 ms `Message::IpcTick` timer polls it
+even when audio is stopped (the meter tick stops when idle), executing requests on the UI thread so
+the `Mixer` never moves. `RUSTMEETER_IPC_PORT` overrides the port; `0` disables it.
 
 ### Settings file (`%APPDATA%\rustmeeter\config.json`)
 
@@ -205,8 +223,10 @@ exit. Hand-editable JSON; values are clamped on load, empty entries are dropped.
 - `toolcall_enabled`, `tools` — Needle schemas passed verbatim to the engine; `triggers` regexes
   additionally gate which captions are sent to the model.
 
-Also in that folder: `app.ico` (extracted from the binary on first run), `captions.log`,
+Also in that folder: `app.ico` (written by the GUI from its embedded asset), `captions.log`,
 `toolcall.log`, and `config.broken.json` if the settings file had to be moved aside.
+`Conf::load_from(root)` allows a portable/test directory; `Conf::write_icon(bytes)` lets a GUI
+provide the icon without the core knowing what an icon is.
 
 ### Tool calling
 
@@ -219,9 +239,10 @@ Also in that folder: `app.ico` (extracted from the binary on first run), `captio
 3. runs the completion under `cactus_call_lock`;
 4. parses `function_calls` and executes each through `Registry` (name → `Tool` impl).
 
-Handlers live in `src/toolcall/tools.rs`; the schema lives in `config.json`. A tool only runs if a
-handler is registered — currently only `switch_light` (shells out to `tool wiz <command>`).
-Every decision is appended to `toolcall.log`.
+Handlers live in `crates/rustmeeter-core/src/toolcall/tools.rs`; the schema lives in `config.json`.
+A tool only runs if a handler is registered — currently only `switch_light` (shells out to
+`tool wiz <command>`). Every decision is appended to `toolcall.log`. `toolcall::run_once` is the
+synchronous path used by IPC; it ignores triggers because the caller explicitly asked for that line.
 
 ### Notable UI behaviours
 
@@ -236,9 +257,46 @@ Every decision is appended to `toolcall.log`.
 - The caption window never touches `completion_slot` (it is typed to the mixer's `Message` and
   single); it polls on a 33 ms timer while active and 250 ms when idle.
 
-## 5. CLI frontend (`crates/rustmeeter-cli`)
+## 5. Local IPC (external scripts)
 
-`rustmeeter list` prints inputs/outputs. `rustmeeter run [--bus-a DEV] [--bus-b DEV]
+The GUI (on by default, port 7590) and `rustmeeter-cli serve` expose a line-oriented JSON API on
+`127.0.0.1`. Nothing is bound to the network. Request/response shapes:
+
+```json
+{"id": 1, "method": "list_devices", "params": {}}
+{"id": 1, "ok": true, "result": {"inputs": [...], "outputs": [...]}}
+{"id": 1, "ok": false, "error": "no strip 3"}
+```
+
+`id` is echoed verbatim. Methods:
+
+| Method | Params | Notes |
+|---|---|---|
+| `ping` | — | version + `pong`. |
+| `list_devices` (`list_device`) | — | inputs with labels/loopback flag, outputs, defaults. |
+| `status` / `snapshot` | — | mixer view: strips (id, routes, gain, mute, EQ, level), buses. |
+| `enable_mixer` / `enablemixer` / `start` | — | start audio. |
+| `disable_mixer` / `disablemixer` / `stop` | — | stop audio (also flushes settings). |
+| `add_strip` | `name`, `loopback`, optional `routes` | returns the new strip id. |
+| `remove_strip` | `id` or 1-based `strip` | keeps the device's settings on disk. |
+| `set_bus` | `bus` (0/1 or `"a"`/`"b"`), `device` or null | rebuilds streams. |
+| `set_gain` / `set_mute` | `bus` or `strip`/`id`, plus `db` / `muted` | live, no rebuild. |
+| `set_route` | `strip`/`id`, `bus`, `on` | live. |
+| `set_eq` | `strip`/`id`, `eq` (same JSON as the settings file) | live. |
+| `captions_on` / `captions_off` | optional `strip` | loads Whistle lazily. |
+| `set_toolcall` | `enabled` | persists the flag. |
+| `toolcall` | `text` | runs Needle now; blocks while the model works. Returns calls and error. |
+| `transcribe` | `path`, optional `language` | decodes a WAV (PCM/float, any rate) to 16 kHz and runs Whistle; blocks. |
+| `save` | — | flush settings. |
+| `shutdown` | — | stop audio; `serve` exits. |
+
+The socket threads only read/write; `Server::poll` executes requests on the thread that owns the
+`Mixer` (the GUI UI thread, or `serve`'s main loop). `toolcall` and `transcribe` therefore block
+that poller; they are deliberate, synchronous calls rather than shortcuts around the audio model.
+
+## 6. CLI frontend (`crates/rustmeeter-cli`)
+
+`rsmtr list` prints inputs/outputs. `rsmtr run [--bus-a DEV] [--bus-b DEV]
 [--mic DEV[:AB]]... [--loopback DEV[:AB]]... [--captions [FILE]] [--whistle PATH]
 [--caption-strip N] [--caption-lang CODE] [--caption-threads N]` starts audio and drops into a
 line-oriented REPL (`status`/`s`, `levels`/`l`, `gain`, `mute`, `eq ...`, `route`, `add`,
@@ -247,7 +305,10 @@ first, then substrings; `default` means the Windows default device. `--mic` defa
 `--loopback` to bus A, overridable with `:A`/`:B`/`:AB`. Structural commands call `Mixer::apply()`
 and briefly restart audio. Captions print each line to stdout as well as the log file.
 
-## 6. Recorder (`crates/recorder`)
+`rsmtr serve [--port N] [--no-start]` is the headless equivalent of the GUI: it opens the
+saved rack from `config.json` via `Service::open`, starts audio, and serves the same IPC API.
+
+## 7. Recorder (`crates/recorder`)
 
 Standalone crossterm TUI for building Whistle fine-tuning datasets. Hotkeys: `1/2/3` pick the
 split, `r` record, `s` stop+save+prompt for transcript, `t` retry transcript, `h` help, `q` quit.
@@ -258,7 +319,7 @@ transcript. Paths are **relative to the current directory**, so run it from the 
 `finetune/` holds sample data: `whistle.cact`, LoRA (`whistle_lora.safetensors`) and full
 (`whistle.safetensors`) checkpoints, plus train/validation/test JSONL manifests.
 
-## 7. Building and running
+## 8. Building and running
 
 Environment prerequisites (see README §1):
 
@@ -273,7 +334,7 @@ cargo build --release                     # everything (see binary-name caveat a
 cargo build --release -p rustmeeter-cli   # CLI only
 cargo build --release -p rustmeeter       # GUI only
 cargo test  -p rustmeeter-core            # unit tests (needs libcactus.a)
-cargo run   --release -p rustmeeter-cli -- list
+cargo run   --release -p rustmeeter-cli --bin rsmtr -- list
 ```
 
 `cargo-core/build.rs` panics with remediation hints if `libcactus.a` is missing; override the
@@ -281,16 +342,17 @@ folder with `CACTUS_LIB_DIR`, the toolchain dir with `LLVM_MINGW_DIR`, or the C+
 `CACTUS_CXX_LIB=stdc++`. Build without the engine at all with `--no-default-features` (captions
 then report that the build has no Cactus).
 
-## 8. Known rough edges
+## 9. Known rough edges
 
 - **Binary name collision** between the GUI and CLI packages (§2).
-- **README drift**: describes `--features gui` / `rustmeeter-gui.exe`, which the current manifests
-  do not define.
-- **Working tree is mid-refactor**: `crates/rustmeeter/src/component/` and `src/toolcall/` are
-  untracked, several GUI/core files are modified, and `PLAN.md` / `_CHANGES.txt` are deleted but
-  not committed. Check `git status` before assuming the committed state.
-- **No IPC / remote control**: the only cross-process surfaces are files (`config.json`,
-  `captions.log`, `toolcall.log`). External control today means driving the CLI over stdin.
+- **IPC is polled on the owner thread**: `toolcall`/`transcribe` are synchronous and block the GUI
+  UI thread while the model runs. A future version can give the IPC server its own command queue
+  or run the slow methods on a worker with a completion method.
+- **IPC has no authentication**: it binds `127.0.0.1` only, but any local process can connect.
+  Set `RUSTMEETER_IPC_PORT=0` to disable it in the GUI.
+- **One IPC owner per port**: starting `serve` while the GUI is running fails to bind unless a
+  different `--port` is given.
+- **Working tree is mid-refactor**: check `git status` before assuming the committed state.
 - **`task.nu`** still invokes the GUI-named binary with CLI arguments
   (`rustmeeter.exe run ...`), which only works if the last build happened to be the CLI.
 - `recorder` hardcodes `LANGUAGE = "id"` and uses backslash-relative manifest paths.
